@@ -1316,22 +1316,32 @@ class _ReleasePanelState extends State<_ReleasePanel> {
   @override
   Widget build(BuildContext context) {
     final lookups = context.read<LookupRepository>();
+    final compact = MediaQuery.sizeOf(context).width < 640;
     return Padding(
-      padding: const EdgeInsets.all(22),
+      padding: EdgeInsets.all(compact ? 12 : 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
-                'Liberación a producción',
-                style: Theme.of(context).textTheme.titleLarge,
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: compact
+                      ? MediaQuery.sizeOf(context).width - 70
+                      : 520,
+                ),
+                child: Text(
+                  'Liberación a producción',
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-              const SizedBox(width: 7),
               const InfoTip(
                 'Convierte una línea del pedido en una o varias órdenes de producción. La suma de asignaciones nunca puede superar la cantidad solicitada.',
               ),
-              const Spacer(),
               IconButton(
                 tooltip: 'Actualizar',
                 onPressed: reload,
@@ -1431,10 +1441,13 @@ class _ReleasePanelState extends State<_ReleasePanel> {
                     final uom = unitName(r['uom_id']);
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: Row(
+                      child: Wrap(
+                        spacing: compact ? 12 : 18,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Expanded(
-                            flex: 3,
+                          SizedBox(
+                            width: compact ? double.infinity : 360,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1464,13 +1477,9 @@ class _ReleasePanelState extends State<_ReleasePanel> {
                               ],
                             ),
                           ),
-                          const SizedBox(width: 24),
                           _Amount(label: 'Solicitado', value: requested),
-                          const SizedBox(width: 22),
                           _Amount(label: 'Asignado', value: allocated),
-                          const SizedBox(width: 22),
                           _Amount(label: 'Pendiente', value: pending),
-                          const SizedBox(width: 18),
                           FilledButton.tonal(
                             onPressed: pending > 0 ? () => _release(r) : null,
                             child: Text(pending > 0 ? 'Crear OP' : 'Liberado'),
@@ -1577,89 +1586,98 @@ class _ReleaseDialogState extends State<_ReleaseDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Row(
-      children: [
-        Icon(CupertinoIcons.hammer, size: 21),
-        SizedBox(width: 10),
-        Expanded(child: Text('Crear orden(es) de producción')),
-        SizedBox(width: 7),
-        InfoTip(
-          'Puedes dividir una sola línea en varias OP. Cada cantidad se convierte en una orden independiente y queda asignada a esta línea.',
-        ),
-      ],
-    ),
-    content: SizedBox(
-      width: 560,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final compact = screenWidth < 640;
+    return AlertDialog(
+      title: const Row(
         children: [
-          Text(
-            'Cantidad pendiente: ${widget.maxQuantity}',
-            style: const TextStyle(color: PomgtColors.muted),
+          Icon(CupertinoIcons.hammer, size: 21),
+          SizedBox(width: 10),
+          Expanded(child: Text('Crear orden(es) de producción')),
+          SizedBox(width: 7),
+          InfoTip(
+            'Puedes dividir una sola línea en varias OP. Cada cantidad se convierte en una orden independiente y queda asignada a esta línea.',
           ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: splits,
-            decoration: const InputDecoration(
-              labelText: 'Cantidades de las OP',
-              hintText: '100000, 50000, 50000',
-            ),
-          ),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: priority,
-            decoration: const InputDecoration(labelText: 'Prioridad'),
-            items: const ['low', 'normal', 'high', 'urgent']
-                .map(
-                  (e) => DropdownMenuItem(
-                    value: e,
-                    child: Text(UiCopy.enumLabel(e)),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) => setState(() => priority = v ?? 'normal'),
-          ),
-          const SizedBox(height: 16),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Fecha requerida',
-              style: TextStyle(fontSize: 13),
-            ),
-            subtitle: Text(
-              requiredAt == null
-                  ? 'Usar fecha del pedido o definir después'
-                  : '${requiredAt!.day}/${requiredAt!.month}/${requiredAt!.year}',
-            ),
-            trailing: const Icon(CupertinoIcons.calendar, size: 18),
-            onTap: () async {
-              final d = await showDatePicker(
-                context: context,
-                firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                lastDate: DateTime(2100),
-                initialDate: requiredAt ?? DateTime.now(),
-              );
-              if (d != null && mounted) setState(() => requiredAt = d);
-            },
-          ),
-          if (error != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              error!,
-              style: const TextStyle(color: PomgtColors.danger, fontSize: 12.5),
-            ),
-          ],
         ],
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancelar'),
+      content: SizedBox(
+        width: compact ? screenWidth - 56 : 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Cantidad pendiente: ${widget.maxQuantity}',
+                style: const TextStyle(color: PomgtColors.muted),
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: splits,
+                decoration: const InputDecoration(
+                  labelText: 'Cantidades de las OP',
+                  hintText: '100000, 50000, 50000',
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: priority,
+                decoration: const InputDecoration(labelText: 'Prioridad'),
+                items: const ['low', 'normal', 'high', 'urgent']
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(UiCopy.enumLabel(e)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => priority = v ?? 'normal'),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Fecha requerida',
+                  style: TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  requiredAt == null
+                      ? 'Usar fecha del pedido o definir después'
+                      : '${requiredAt!.day}/${requiredAt!.month}/${requiredAt!.year}',
+                ),
+                trailing: const Icon(CupertinoIcons.calendar, size: 18),
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    lastDate: DateTime(2100),
+                    initialDate: requiredAt ?? DateTime.now(),
+                  );
+                  if (d != null && mounted) setState(() => requiredAt = d);
+                },
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  error!,
+                  style: const TextStyle(
+                    color: PomgtColors.danger,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      FilledButton(onPressed: submit, child: const Text('Crear OP')),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(onPressed: submit, child: const Text('Crear OP')),
+      ],
+    );
+  }
 }

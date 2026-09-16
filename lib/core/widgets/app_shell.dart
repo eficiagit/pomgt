@@ -29,29 +29,34 @@ class AppShell extends StatelessWidget {
       drawer: narrow
           ? const Drawer(width: 306, child: _Sidebar(forceExpanded: true))
           : null,
-      body: Container(
-        color: PomgtColors.appBg,
-        child: Row(
-          children: [
-            if (!narrow) const _Sidebar(),
-            Expanded(
-              child: Column(
-                children: [
-                  if (nav.section != AppSection.dashboard)
-                    _TopBar(showMenu: narrow),
-                  Expanded(
-                    child: SoftContentSwitch(
-                      child: KeyedSubtree(
-                        key: ValueKey(nav.section),
-                        child: _body(nav.section),
+      body: Stack(
+        children: [
+          Container(
+            color: PomgtColors.appBg,
+            child: Row(
+              children: [
+                if (!narrow) const _Sidebar(),
+                Expanded(
+                  child: Column(
+                    children: [
+                      if (nav.section != AppSection.dashboard)
+                        const _TopBar(showMenu: false),
+                      Expanded(
+                        child: SoftContentSwitch(
+                          child: KeyedSubtree(
+                            key: ValueKey(nav.section),
+                            child: _body(nav.section),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (narrow) const _MobileNavButton(),
+        ],
       ),
     );
   }
@@ -84,6 +89,35 @@ class AppShell extends StatelessWidget {
   }
 }
 
+class _MobileNavButton extends StatelessWidget {
+  const _MobileNavButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 0, 0),
+          child: Builder(
+            builder: (context) => Material(
+              color: PomgtColors.canvas,
+              borderRadius: PomgtRadii.borderSm,
+              elevation: 4,
+              shadowColor: Colors.black.withValues(alpha: .16),
+              child: IconButton(
+                tooltip: 'Abrir navegación',
+                onPressed: () => Scaffold.of(context).openDrawer(),
+                icon: const Icon(CupertinoIcons.sidebar_left, size: 20),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TopBar extends StatelessWidget {
   const _TopBar({required this.showMenu});
   final bool showMenu;
@@ -92,9 +126,11 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final org = context.watch<OrganizationController>().organization;
     final user = context.watch<AuthController>().user;
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 640;
     return Container(
-      height: 82,
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      height: compact ? 64 : 82,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 32),
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
         border: const Border(bottom: BorderSide(color: PomgtColors.line)),
@@ -116,11 +152,10 @@ class _TopBar extends StatelessWidget {
                 icon: const Icon(CupertinoIcons.sidebar_left, size: 20),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: compact ? 4 : 8),
           ],
           const Spacer(),
-          const SizedBox(width: 16),
-          if (org != null)
+          if (org != null && !compact)
             Tooltip(
               message:
                   'Organización activa. Todos los registros mostrados pertenecen a esta empresa.',
@@ -132,7 +167,7 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ),
-          const SizedBox(width: 18),
+          SizedBox(width: compact ? 8 : 18),
           PopupMenuButton<String>(
             tooltip: 'Cuenta',
             offset: const Offset(0, 42),

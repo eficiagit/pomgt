@@ -52,12 +52,17 @@ class StatusPill extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         SizedBox(width: plain ? 8 : 6),
-        Text(
-          UiCopy.enumLabel(value),
-          style: TextStyle(
-            color: plain ? PomgtColors.ink : color,
-            fontSize: plain ? 12 : 11,
-            fontWeight: FontWeight.w800,
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 150),
+          child: Text(
+            UiCopy.enumLabel(value),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: plain ? PomgtColors.ink : color,
+              fontSize: plain ? 12 : 11,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
       ],

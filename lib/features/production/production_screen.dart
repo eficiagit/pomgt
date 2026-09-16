@@ -21,6 +21,7 @@ import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import '../../data/repositories/production_repository.dart';
 import '../../data/services/production_order_pdf_service.dart';
+import 'production_operator_display.dart' show ProductionOperatorDisplay;
 
 void _showProductionNotice(
   BuildContext context, {
@@ -592,12 +593,6 @@ class _ProductionMasterList extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: PomgtColors.line),
-                bottom: BorderSide(color: PomgtColors.line),
-              ),
-            ),
             child: Text(
               '${rows.length} ${rows.length == 1 ? 'orden' : 'órdenes'}',
               style: const TextStyle(
@@ -650,13 +645,24 @@ class _ProductionMasterList extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
+                                  const SizedBox(
+                                    width: 30,
+                                    height: 30,
+                                    child: Icon(
+                                      CupertinoIcons.gear_alt,
+                                      size: 17,
+                                      color: PomgtColors.ink,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      row['op_number']?.toString() ??
-                                          'Orden de producción',
+                                      row['op_number']?.toString() ?? 'OP',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: PomgtColors.ink,
-                                        fontSize: 13.5,
+                                        fontSize: 12,
                                         fontWeight: FontWeight.w900,
                                       ),
                                     ),
@@ -911,11 +917,13 @@ class _ProductionDetailState extends State<_ProductionDetail> {
       if (!mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (_) => Dialog(
-          insetPadding: const EdgeInsets.all(28),
+        builder: (dialogContext) => Dialog(
+          insetPadding: EdgeInsets.all(
+            MediaQuery.sizeOf(dialogContext).width < 640 ? 10 : 28,
+          ),
           child: SizedBox(
-            width: 980,
-            height: 760,
+            width: _responsiveDialogWidth(dialogContext, 980),
+            height: MediaQuery.sizeOf(dialogContext).height * .86,
             child: Column(
               children: [
                 Padding(
@@ -995,8 +1003,11 @@ class _ProductionDetailState extends State<_ProductionDetail> {
     return Container(
       decoration: BoxDecoration(
         color: PomgtColors.surface,
+        borderRadius: PomgtRadii.borderMd,
         border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
+        boxShadow: PomgtShadows.card,
       ),
+      clipBehavior: Clip.antiAlias,
       child: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
@@ -1110,6 +1121,19 @@ class _ProductionDetailState extends State<_ProductionDetail> {
                   );
                   if (changed == true && mounted) _reload();
                 },
+                onOperatorDisplay: () async {
+                  final productionRepository = repository;
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      fullscreenDialog: true,
+                      builder: (_) => ProductionOperatorDisplay(
+                        orderId: widget.orderId,
+                        repository: productionRepository,
+                      ),
+                    ),
+                  );
+                  if (mounted) _reload();
+                },
                 onPreviewPdf: _previewPdf,
                 onSavePdf: () => _action(
                   () => pdf.saveAsDocument(widget.orderId),
@@ -1172,6 +1196,7 @@ class _ProductionHero extends StatelessWidget {
     required this.onComplete,
     required this.onCancel,
     required this.onPlan,
+    required this.onOperatorDisplay,
     required this.onPreviewPdf,
     required this.onSavePdf,
   });
@@ -1183,6 +1208,7 @@ class _ProductionHero extends StatelessWidget {
   final VoidCallback? onComplete;
   final VoidCallback? onCancel;
   final VoidCallback onPlan;
+  final VoidCallback onOperatorDisplay;
   final VoidCallback onPreviewPdf;
   final VoidCallback onSavePdf;
 
@@ -1200,57 +1226,70 @@ class _ProductionHero extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: PomgtColors.line)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        order['op_number']?.toString() ?? 'Orden de producción',
-                        style: const TextStyle(
-                          color: PomgtColors.ink,
-                          fontSize: 21,
-                          fontWeight: FontWeight.w900,
-                        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 820;
+          final titleBlock = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isCompact
+                          ? (constraints.maxWidth - 36).clamp(
+                              0.0,
+                              double.infinity,
+                            )
+                          : 520,
+                    ),
+                    child: Text(
+                      order['op_number']?.toString() ?? 'Orden de producción',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: PomgtColors.ink,
+                        fontSize: 21,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    _StatusText(status: order['status']?.toString() ?? 'draft'),
-                    const SizedBox(width: 8),
-                    const InfoTip(
-                      'Expediente operativo congelado de esta orden de producción.',
-                      size: 15,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  '${product['sku'] ?? '—'} · ${product['name'] ?? 'Producto'}${clientName == null ? '' : ' · $clientName'}${order['order_number'] == null ? '' : ' · ${order['order_number']}'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: PomgtColors.muted,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
                   ),
+                  _StatusText(status: order['status']?.toString() ?? 'draft'),
+                  const InfoTip(
+                    'Expediente operativo congelado de esta orden de producción.',
+                    size: 15,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${product['sku'] ?? '—'} · ${product['name'] ?? 'Producto'}${clientName == null ? '' : ' · $clientName'}${order['order_number'] == null ? '' : ' · ${order['order_number']}'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: PomgtColors.muted,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
                 ),
-              ],
-            ),
-          ),
-          Wrap(
+              ),
+            ],
+          );
+          final actionBlock = Wrap(
             spacing: 4,
             runSpacing: 4,
-            alignment: WrapAlignment.end,
+            alignment: isCompact ? WrapAlignment.start : WrapAlignment.end,
             children: [
               TextButton.icon(
                 onPressed: onPlan,
                 icon: const Icon(CupertinoIcons.calendar, size: 16),
                 label: const Text('Planeación'),
+              ),
+              FilledButton.icon(
+                onPressed: onOperatorDisplay,
+                icon: const Icon(Icons.smart_display_outlined, size: 17),
+                label: const Text('Display operador'),
               ),
               PopupMenuButton<String>(
                 tooltip: 'PDF y documentos',
@@ -1318,8 +1357,29 @@ class _ProductionHero extends StatelessWidget {
                 ],
               ),
             ],
-          ),
-        ],
+          );
+
+          if (isCompact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [titleBlock, const SizedBox(height: 12), actionBlock],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 16),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constraints.maxWidth * .58,
+                ),
+                child: actionBlock,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1481,42 +1541,46 @@ class _ProductionTabs extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: PomgtColors.line)),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var i = 0; i < labels.length; i++)
-              InkWell(
-                onTap: () => onChanged(i),
-                child: Container(
-                  height: 45,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < labels.length; i++)
+                InkWell(
+                  onTap: () => onChanged(i),
+                  child: Container(
+                    height: 45,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: i == selected
+                              ? PomgtColors.blue
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      labels[i],
+                      style: TextStyle(
                         color: i == selected
-                            ? PomgtColors.blue
-                            : Colors.transparent,
-                        width: 2,
+                            ? PomgtColors.ink
+                            : PomgtColors.muted,
+                        fontSize: 12,
+                        fontWeight: i == selected
+                            ? FontWeight.w900
+                            : FontWeight.w700,
                       ),
                     ),
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    labels[i],
-                    style: TextStyle(
-                      color: i == selected
-                          ? PomgtColors.ink
-                          : PomgtColors.muted,
-                      fontSize: 12,
-                      fontWeight: i == selected
-                          ? FontWeight.w900
-                          : FontWeight.w700,
-                    ),
-                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1895,63 +1959,78 @@ class _MaterialsTab extends StatelessWidget {
         _Panel(
           title: 'Materiales requeridos para la orden',
           icon: Icons.layers_outlined,
-          child: Column(
-            children: [
-              const _TableHeader(
-                columns: [
-                  'Material',
-                  'Tipo',
-                  'Requerido',
-                  'Surtido',
-                  'Consumido',
-                  'Devuelto',
-                  'Merma',
-                  'Acción',
-                ],
-              ),
-              for (final row in rows)
-                _MaterialRow(
-                  row: row,
-                  product: _map(
-                    products[row['material_product_id']?.toString()],
-                  ),
-                  unit: _map(units[row['uom_id']?.toString()]),
-                  onMove: () async {
-                    final request = await showDialog<_MaterialMovementRequest>(
-                      context: context,
-                      builder: (_) => _MaterialMovementDialog(
-                        materialName:
-                            _map(
-                              products[row['material_product_id']?.toString()],
-                            )['name']?.toString() ??
-                            'Material',
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final tableWidth = constraints.maxWidth < 860
+                  ? 860.0
+                  : constraints.maxWidth;
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: tableWidth,
+                  child: Column(
+                    children: [
+                      const _TableHeader(
+                        columns: [
+                          'Material',
+                          'Tipo',
+                          'Requerido',
+                          'Surtido',
+                          'Consumido',
+                          'Devuelto',
+                          'Merma',
+                          'Acción',
+                        ],
                       ),
-                    );
-                    if (request == null || !context.mounted) return;
-                    try {
-                      await context
-                          .read<ProductionRepository>()
-                          .materialMovement(
-                            materialId: row['id'].toString(),
-                            movementType: request.type,
-                            quantity: request.quantity,
-                            lotNumber: request.lot,
-                            warehouseReference: request.warehouse,
-                            note: request.note,
-                          );
-                      if (!context.mounted) return;
-                      onChanged();
-                      _showProductionSuccess(
-                        context,
-                        'Movimiento de material registrado.',
-                      );
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      _showProductionError(context, e);
-                    }
-                  },
+                      for (final row in rows)
+                        _MaterialRow(
+                          row: row,
+                          product: _map(
+                            products[row['material_product_id']?.toString()],
+                          ),
+                          unit: _map(units[row['uom_id']?.toString()]),
+                          onMove: () async {
+                            final request =
+                                await showDialog<_MaterialMovementRequest>(
+                                  context: context,
+                                  builder: (_) => _MaterialMovementDialog(
+                                    materialName:
+                                        _map(
+                                          products[row['material_product_id']
+                                              ?.toString()],
+                                        )['name']?.toString() ??
+                                        'Material',
+                                  ),
+                                );
+                            if (request == null || !context.mounted) return;
+                            try {
+                              await context
+                                  .read<ProductionRepository>()
+                                  .materialMovement(
+                                    materialId: row['id'].toString(),
+                                    movementType: request.type,
+                                    quantity: request.quantity,
+                                    lotNumber: request.lot,
+                                    warehouseReference: request.warehouse,
+                                    note: request.note,
+                                  );
+                              if (!context.mounted) return;
+                              onChanged();
+                              _showProductionSuccess(
+                                context,
+                                'Movimiento de material registrado.',
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              _showProductionError(context, e);
+                            }
+                          },
+                        ),
+                    ],
+                  ),
                 ),
-            ],
+              );
+            },
           ),
         ),
         const SizedBox(height: 14),
@@ -2242,7 +2321,7 @@ class _Panel extends StatelessWidget {
   final Widget? trailing;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
+    padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 640 ? 12 : 16),
     decoration: BoxDecoration(
       color: PomgtColors.canvas,
       borderRadius: PomgtRadii.borderMd,
@@ -2252,18 +2331,25 @@ class _Panel extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             if (icon != null) ...[
               Icon(icon, size: 18, color: PomgtColors.blue),
-              const SizedBox(width: 8),
             ],
-            Expanded(
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width < 640 ? 260 : 520,
+              ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
                     child: Text(
                       title,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 15,
@@ -2599,10 +2685,15 @@ class _QualityRow extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: PomgtColors.line)),
       ),
-      child: Row(
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Expanded(
-            flex: 3,
+          SizedBox(
+            width: MediaQuery.sizeOf(context).width < 640
+                ? double.infinity
+                : 300,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2624,7 +2715,8 @@ class _QualityRow extends StatelessWidget {
               ],
             ),
           ),
-          Expanded(
+          SizedBox(
+            width: 160,
             child: Text(
               _qualityLimits(row),
               style: const TextStyle(
@@ -2633,7 +2725,7 @@ class _QualityRow extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(child: _StatusText(status: status)),
+          _StatusText(status: status),
           TextButton(
             onPressed: status == 'pending' || status == 'failed'
                 ? onCapture
@@ -2661,7 +2753,10 @@ class _ChecklistRow extends StatelessWidget {
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: PomgtColors.line)),
     ),
-    child: Row(
+    child: Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Icon(
           row['is_completed'] == true
@@ -2672,8 +2767,8 @@ class _ChecklistRow extends StatelessWidget {
               ? PomgtColors.success
               : PomgtColors.muted,
         ),
-        const SizedBox(width: 10),
-        Expanded(
+        SizedBox(
+          width: MediaQuery.sizeOf(context).width < 640 ? double.infinity : 420,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2717,41 +2812,78 @@ class _CostLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 520;
+        if (compact) {
+          return Wrap(
+            spacing: 16,
+            runSpacing: 6,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                'Est: $currency \$${_n(estimated).toStringAsFixed(2)}',
+                style: TextStyle(
+                  color: PomgtColors.secondaryInk,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                ),
+              ),
+              Text(
+                'Real: $currency \$${_n(actual).toStringAsFixed(2)}',
+                style: TextStyle(
+                  color: PomgtColors.ink,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+                ),
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                ),
+              ),
             ),
-          ),
-        ),
-        SizedBox(
-          width: 170,
-          child: Text(
-            '$currency \$${_n(estimated).toStringAsFixed(2)}',
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              color: PomgtColors.secondaryInk,
-              fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+            SizedBox(
+              width: 170,
+              child: Text(
+                '$currency \$${_n(estimated).toStringAsFixed(2)}',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: PomgtColors.secondaryInk,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(width: 34),
-        SizedBox(
-          width: 170,
-          child: Text(
-            '$currency \$${_n(actual).toStringAsFixed(2)}',
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              color: PomgtColors.ink,
-              fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+            const SizedBox(width: 34),
+            SizedBox(
+              width: 170,
+              child: Text(
+                '$currency \$${_n(actual).toStringAsFixed(2)}',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: PomgtColors.ink,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     ),
   );
 }
@@ -2986,7 +3118,7 @@ class _CreateProductionOrderDialogState
       ],
     ),
     content: SizedBox(
-      width: 760,
+      width: _responsiveDialogWidth(context, 760),
       child: FutureBuilder<List<List<Map<String, dynamic>>>>(
         future: future,
         builder: (context, snapshot) {
@@ -3420,57 +3552,70 @@ class _PlanningDialogState extends State<_PlanningDialog> {
       ],
     ),
     content: SizedBox(
-      width: 620,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _DateField(
-                  label: 'Inicio planificado',
-                  value: start,
-                  onChanged: (d) => setState(() => start = d),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: _DateField(
-                  label: 'Fin planificado',
-                  value: end,
-                  onChanged: (d) => setState(() => end = d),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: _DateField(
-                  label: 'Fecha requerida',
-                  value: required,
-                  onChanged: (d) => setState(() => required = d),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          DropdownButtonFormField<String>(
-            initialValue: priority,
-            decoration: const InputDecoration(labelText: 'Prioridad'),
-            items: const [
-              DropdownMenuItem(value: 'low', child: Text('Baja')),
-              DropdownMenuItem(value: 'normal', child: Text('Normal')),
-              DropdownMenuItem(value: 'high', child: Text('Alta')),
-              DropdownMenuItem(value: 'urgent', child: Text('Urgente')),
-            ],
-            onChanged: (v) => setState(() => priority = v ?? 'normal'),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: notes,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Notas'),
-          ),
-        ],
+      width: _responsiveDialogWidth(context, 620),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 600;
+                final fieldWidth = wide
+                    ? (constraints.maxWidth - 36) / 3
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: 18,
+                  runSpacing: 14,
+                  children: [
+                    SizedBox(
+                      width: fieldWidth,
+                      child: _DateField(
+                        label: 'Inicio planificado',
+                        value: start,
+                        onChanged: (d) => setState(() => start = d),
+                      ),
+                    ),
+                    SizedBox(
+                      width: fieldWidth,
+                      child: _DateField(
+                        label: 'Fin planificado',
+                        value: end,
+                        onChanged: (d) => setState(() => end = d),
+                      ),
+                    ),
+                    SizedBox(
+                      width: fieldWidth,
+                      child: _DateField(
+                        label: 'Fecha requerida',
+                        value: required,
+                        onChanged: (d) => setState(() => required = d),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 15),
+            DropdownButtonFormField<String>(
+              initialValue: priority,
+              decoration: const InputDecoration(labelText: 'Prioridad'),
+              items: const [
+                DropdownMenuItem(value: 'low', child: Text('Baja')),
+                DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                DropdownMenuItem(value: 'high', child: Text('Alta')),
+                DropdownMenuItem(value: 'urgent', child: Text('Urgente')),
+              ],
+              onChanged: (v) => setState(() => priority = v ?? 'normal'),
+            ),
+            const SizedBox(height: 15),
+            TextField(
+              controller: notes,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Notas'),
+            ),
+          ],
+        ),
       ),
     ),
     actions: [
@@ -3603,50 +3748,59 @@ class _CompleteOperationDialogState extends State<_CompleteOperationDialog> {
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Completar operación'),
     content: SizedBox(
-      width: 520,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            widget.operation['name']?.toString() ?? 'Operación',
-            style: const TextStyle(color: PomgtColors.muted),
-          ),
-          const SizedBox(height: 15),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: completed,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'Cantidad buena *',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: TextField(
-                  controller: rejected,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'Cantidad rechazada',
+      width: _responsiveDialogWidth(context, 520),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.operation['name']?.toString() ?? 'Operación',
+              style: const TextStyle(color: PomgtColors.muted),
+            ),
+            const SizedBox(height: 15),
+            Wrap(
+              spacing: 18,
+              runSpacing: 14,
+              children: [
+                SizedBox(
+                  width: _responsiveDialogWidth(context, 520) < 520
+                      ? double.infinity
+                      : 251,
+                  child: TextField(
+                    controller: completed,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Cantidad buena *',
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: note,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Notas de cierre'),
-          ),
-        ],
+                SizedBox(
+                  width: _responsiveDialogWidth(context, 520) < 520
+                      ? double.infinity
+                      : 251,
+                  child: TextField(
+                    controller: rejected,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Cantidad rechazada',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 15),
+            TextField(
+              controller: note,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Notas de cierre'),
+            ),
+          ],
+        ),
       ),
     ),
     actions: [
@@ -3714,65 +3868,78 @@ class _MaterialMovementDialogState extends State<_MaterialMovementDialog> {
       ],
     ),
     content: SizedBox(
-      width: 540,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            widget.materialName,
-            style: const TextStyle(color: PomgtColors.muted),
-          ),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            initialValue: type,
-            decoration: const InputDecoration(labelText: 'Movimiento'),
-            items: const [
-              DropdownMenuItem(
-                value: 'issue',
-                child: Text('Surtido a producción'),
-              ),
-              DropdownMenuItem(value: 'consume', child: Text('Consumo')),
-              DropdownMenuItem(value: 'return', child: Text('Devolución')),
-              DropdownMenuItem(value: 'scrap', child: Text('Merma')),
-              DropdownMenuItem(value: 'adjustment', child: Text('Ajuste')),
-            ],
-            onChanged: (v) => setState(() => type = v ?? 'issue'),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: quantity,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Cantidad *'),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: lot,
-                  decoration: const InputDecoration(labelText: 'Lote / serie'),
+      width: _responsiveDialogWidth(context, 540),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.materialName,
+              style: const TextStyle(color: PomgtColors.muted),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: type,
+              decoration: const InputDecoration(labelText: 'Movimiento'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'issue',
+                  child: Text('Surtido a producción'),
                 ),
+                DropdownMenuItem(value: 'consume', child: Text('Consumo')),
+                DropdownMenuItem(value: 'return', child: Text('Devolución')),
+                DropdownMenuItem(value: 'scrap', child: Text('Merma')),
+                DropdownMenuItem(value: 'adjustment', child: Text('Ajuste')),
+              ],
+              onChanged: (v) => setState(() => type = v ?? 'issue'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: quantity,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
               ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: TextField(
-                  controller: warehouse,
-                  decoration: const InputDecoration(
-                    labelText: 'Almacén / ubicación',
+              decoration: const InputDecoration(labelText: 'Cantidad *'),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 18,
+              runSpacing: 14,
+              children: [
+                SizedBox(
+                  width: _responsiveDialogWidth(context, 540) < 540
+                      ? double.infinity
+                      : 261,
+                  child: TextField(
+                    controller: lot,
+                    decoration: const InputDecoration(
+                      labelText: 'Lote / serie',
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: note,
-            minLines: 2,
-            maxLines: 3,
-            decoration: const InputDecoration(labelText: 'Notas'),
-          ),
-        ],
+                SizedBox(
+                  width: _responsiveDialogWidth(context, 540) < 540
+                      ? double.infinity
+                      : 261,
+                  child: TextField(
+                    controller: warehouse,
+                    decoration: const InputDecoration(
+                      labelText: 'Almacén / ubicación',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: note,
+              minLines: 2,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: 'Notas'),
+            ),
+          ],
+        ),
       ),
     ),
     actions: [
@@ -3885,61 +4052,63 @@ class _QualityDialogState extends State<_QualityDialog> {
     return AlertDialog(
       title: const Text('Registrar control de calidad'),
       content: SizedBox(
-        width: 540,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.check['name']?.toString() ?? 'Control',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _qualityLimits(widget.check),
-              style: const TextStyle(color: PomgtColors.muted, fontSize: 12),
-            ),
-            if ((widget.check['instructions']?.toString() ?? '')
-                .isNotEmpty) ...[
-              const SizedBox(height: 6),
+        width: _responsiveDialogWidth(context, 540),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               Text(
-                widget.check['instructions'].toString(),
-                style: const TextStyle(
-                  color: PomgtColors.secondaryInk,
-                  fontSize: 12,
-                ),
+                widget.check['name']?.toString() ?? 'Control',
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-            ],
-            const SizedBox(height: 16),
-            field,
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String?>(
-              initialValue: forceStatus,
-              decoration: const InputDecoration(
-                labelText: 'Resultado manual (opcional)',
+              const SizedBox(height: 4),
+              Text(
+                _qualityLimits(widget.check),
+                style: const TextStyle(color: PomgtColors.muted, fontSize: 12),
               ),
-              items: const [
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('Evaluar automáticamente'),
-                ),
-                DropdownMenuItem(value: 'passed', child: Text('Aprobado')),
-                DropdownMenuItem(value: 'failed', child: Text('Rechazado')),
-                DropdownMenuItem(
-                  value: 'not_applicable',
-                  child: Text('No aplica'),
+              if ((widget.check['instructions']?.toString() ?? '')
+                  .isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  widget.check['instructions'].toString(),
+                  style: const TextStyle(
+                    color: PomgtColors.secondaryInk,
+                    fontSize: 12,
+                  ),
                 ),
               ],
-              onChanged: (v) => setState(() => forceStatus = v),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: note,
-              minLines: 2,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Observaciones'),
-            ),
-          ],
+              const SizedBox(height: 16),
+              field,
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String?>(
+                initialValue: forceStatus,
+                decoration: const InputDecoration(
+                  labelText: 'Resultado manual (opcional)',
+                ),
+                items: const [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Evaluar automáticamente'),
+                  ),
+                  DropdownMenuItem(value: 'passed', child: Text('Aprobado')),
+                  DropdownMenuItem(value: 'failed', child: Text('Rechazado')),
+                  DropdownMenuItem(
+                    value: 'not_applicable',
+                    child: Text('No aplica'),
+                  ),
+                ],
+                onChanged: (v) => setState(() => forceStatus = v),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: note,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Observaciones'),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -4033,32 +4202,38 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
     return AlertDialog(
       title: const Text('Responder verificación'),
       content: SizedBox(
-        width: 520,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.item['prompt']?.toString() ?? 'Verificación',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            if ((widget.item['instructions']?.toString() ?? '').isNotEmpty) ...[
-              const SizedBox(height: 5),
+        width: _responsiveDialogWidth(context, 520),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               Text(
-                widget.item['instructions'].toString(),
-                style: const TextStyle(color: PomgtColors.muted, fontSize: 12),
+                widget.item['prompt']?.toString() ?? 'Verificación',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              if ((widget.item['instructions']?.toString() ?? '')
+                  .isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(
+                  widget.item['instructions'].toString(),
+                  style: const TextStyle(
+                    color: PomgtColors.muted,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 15),
+              field,
+              const SizedBox(height: 14),
+              TextField(
+                controller: note,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Notas'),
               ),
             ],
-            const SizedBox(height: 15),
-            field,
-            const SizedBox(height: 14),
-            TextField(
-              controller: note,
-              minLines: 2,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Notas'),
-            ),
-          ],
+          ),
         ),
       ),
       actions: [
@@ -4138,23 +4313,30 @@ class _CostDialogState extends State<_CostDialog> {
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Actualizar costos de la OP'),
     content: SizedBox(
-      width: 680,
-      child: Wrap(
-        spacing: 18,
-        runSpacing: 14,
-        children: [
-          for (final field in fields)
-            SizedBox(
-              width: 315,
-              child: TextField(
-                controller: controllers[field[0]],
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+      width: _responsiveDialogWidth(context, 680),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 660;
+          return Wrap(
+            spacing: 18,
+            runSpacing: 14,
+            children: [
+              for (final field in fields)
+                SizedBox(
+                  width: wide
+                      ? (constraints.maxWidth - 18) / 2
+                      : constraints.maxWidth,
+                  child: TextField(
+                    controller: controllers[field[0]],
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(labelText: field[1]),
+                  ),
                 ),
-                decoration: InputDecoration(labelText: field[1]),
-              ),
-            ),
-        ],
+            ],
+          );
+        },
       ),
     ),
     actions: [
@@ -4292,6 +4474,13 @@ String _fmt(dynamic value) {
 
 String _show(dynamic value) =>
     value == null || value.toString().trim().isEmpty ? '—' : value.toString();
+
+double _responsiveDialogWidth(BuildContext context, double maxWidth) {
+  final available = MediaQuery.sizeOf(context).width - 56;
+  if (available <= 0) return maxWidth;
+  return available < maxWidth ? available : maxWidth;
+}
+
 String? _nullable(String value) => value.trim().isEmpty ? null : value.trim();
 DateTime? _dt(dynamic value) =>
     value == null ? null : DateTime.tryParse(value.toString())?.toLocal();

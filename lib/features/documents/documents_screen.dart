@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/entity_crud_panel.dart';
@@ -228,16 +229,16 @@ class _VersionsPanelState extends State<_VersionsPanel> {
   Future<void> upload() async {
     final file = await FilePicker.pickFile();
     if (file == null || !mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
     final repository = context.read<DocumentRepository>();
     late final Uint8List bytes;
     try {
       bytes = await file.readAsBytes();
     } catch (_) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('No fue posible leer el archivo seleccionado.'),
-        ),
+      if (!mounted) return;
+      showPomgtSnackBar(
+        context,
+        'No fue posible leer el archivo seleccionado.',
+        isError: true,
       );
       return;
     }
@@ -257,13 +258,11 @@ class _VersionsPanelState extends State<_VersionsPanel> {
         changeNotes: meta.notes,
       );
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Nueva versión cargada.')),
-      );
+      showPomgtSnackBar(context, 'Nueva versión cargada.');
       reload();
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(ErrorCopy.message(e))));
+        showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
       }
     }
   }
@@ -276,9 +275,7 @@ class _VersionsPanelState extends State<_VersionsPanel> {
       await launchUrl(Uri.parse(url), webOnlyWindowName: '_blank');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(ErrorCopy.message(e))));
+        showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
       }
     }
   }
@@ -450,53 +447,61 @@ class _VersionDialogState extends State<_VersionDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Nueva versión'),
-    content: SizedBox(
-      width: 500,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            widget.filename,
-            style: const TextStyle(color: PomgtColors.muted),
-          ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: label,
-            decoration: const InputDecoration(
-              labelText: 'Etiqueta de versión',
-              hintText: 'Ej. Rev C',
-            ),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: notes,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Notas del cambio'),
-          ),
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancelar'),
-      ),
-      FilledButton(
-        onPressed: () => Navigator.pop(
-          context,
-          _VersionMeta(
-            label.text.trim().isEmpty ? null : label.text.trim(),
-            notes.text.trim().isEmpty ? null : notes.text.trim(),
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 620;
+    return AlertDialog(
+      title: const Text('Nueva versión'),
+      content: SizedBox(
+        width: compact ? width - 56 : 500,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.filename,
+                style: const TextStyle(color: PomgtColors.muted),
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: label,
+                decoration: const InputDecoration(
+                  labelText: 'Etiqueta de versión',
+                  hintText: 'Ej. Rev C',
+                ),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: notes,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Notas del cambio',
+                ),
+              ),
+            ],
           ),
         ),
-        child: const Text('Continuar'),
       ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+            context,
+            _VersionMeta(
+              label.text.trim().isEmpty ? null : label.text.trim(),
+              notes.text.trim().isEmpty ? null : notes.text.trim(),
+            ),
+          ),
+          child: const Text('Continuar'),
+        ),
+      ],
+    );
+  }
 }
 
 class _KV extends StatelessWidget {

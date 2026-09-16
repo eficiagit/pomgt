@@ -85,86 +85,105 @@ class MasterDataScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: _tables.length,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 18, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 640;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 12 : 32,
+              compact ? 12 : 18,
+              compact ? 12 : 32,
+              compact ? 16 : 32,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Datos maestros',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: PomgtColors.ink,
-                    letterSpacing: 0,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: compact ? constraints.maxWidth - 40 : 520,
+                      ),
+                      child: Text(
+                        'Datos maestros',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: PomgtColors.ink,
+                              letterSpacing: 0,
+                            ),
+                      ),
+                    ),
+                    const InfoTip(
+                      'Configuración compartida por los módulos. Aquí se administran catálogos que cambian con poca frecuencia.',
+                      size: 19,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: PomgtColors.surfaceAlt,
+                    borderRadius: PomgtRadii.borderSm,
+                  ),
+                  child: TabBar(
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    dividerColor: Colors.transparent,
+                    indicatorColor: PomgtColors.blue,
+                    indicator: const BoxDecoration(
+                      color: PomgtColors.canvas,
+                      borderRadius: PomgtRadii.borderSm,
+                    ),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    labelColor: PomgtColors.ink,
+                    unselectedLabelColor: PomgtColors.muted,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    tabs: _tables.map((t) {
+                      final spec = Phase1Schema.tables[t.table];
+                      final label =
+                          t.label ?? UiCopy.tableTitle(t.table, spec?.title);
+                      final tip =
+                          t.help ??
+                          UiCopy.tableDescription(t.table, spec?.description);
+                      return Tab(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(label),
+                            const SizedBox(width: 5),
+                            InfoTip(tip, size: 13),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                const InfoTip(
-                  'Configuración compartida por los módulos. Aquí se administran catálogos que cambian con poca frecuencia.',
-                  size: 19,
+                const SizedBox(height: 22),
+                Expanded(
+                  child: TabBarView(
+                    children: _tables.map((t) {
+                      if (t.table == 'material_types') {
+                        return const MaterialTypesAdmin();
+                      }
+                      return EntityCrudPanel(
+                        table: t.table,
+                        repository: context.read<GenericRepository>(),
+                        lookups: context.read<LookupRepository>(),
+                        description: t.help,
+                      );
+                    }).toList(),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: PomgtColors.surfaceAlt,
-                borderRadius: PomgtRadii.borderSm,
-              ),
-              child: TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                dividerColor: Colors.transparent,
-                indicatorColor: PomgtColors.blue,
-                indicator: const BoxDecoration(
-                  color: PomgtColors.canvas,
-                  borderRadius: PomgtRadii.borderSm,
-                ),
-                indicatorSize: TabBarIndicatorSize.tab,
-                labelColor: PomgtColors.ink,
-                unselectedLabelColor: PomgtColors.muted,
-                labelStyle: const TextStyle(fontWeight: FontWeight.w800),
-                tabs: _tables.map((t) {
-                  final spec = Phase1Schema.tables[t.table];
-                  final label =
-                      t.label ?? UiCopy.tableTitle(t.table, spec?.title);
-                  final tip =
-                      t.help ??
-                      UiCopy.tableDescription(t.table, spec?.description);
-                  return Tab(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(label),
-                        const SizedBox(width: 5),
-                        InfoTip(tip, size: 13),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 22),
-            Expanded(
-              child: TabBarView(
-                children: _tables.map((t) {
-                  if (t.table == 'material_types') {
-                    return const MaterialTypesAdmin();
-                  }
-                  return EntityCrudPanel(
-                    table: t.table,
-                    repository: context.read<GenericRepository>(),
-                    lookups: context.read<LookupRepository>(),
-                    description: t.help,
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

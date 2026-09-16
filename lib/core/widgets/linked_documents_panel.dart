@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/repositories/document_repository.dart';
 import '../theme/pomgt_theme.dart';
+import '../utils/app_notice.dart';
 import '../utils/error_copy.dart';
 import 'info_tip.dart';
 
@@ -63,15 +64,15 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
   Future<void> _upload() async {
     final file = await FilePicker.pickFile();
     if (file == null || !mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
     late final Uint8List bytes;
     try {
       bytes = await file.readAsBytes();
     } catch (_) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('No fue posible leer el archivo seleccionado.'),
-        ),
+      if (!mounted) return;
+      showPomgtSnackBar(
+        context,
+        'No fue posible leer el archivo seleccionado.',
+        isError: true,
       );
       return;
     }
@@ -95,13 +96,11 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
         mimeType: _mime(file.extension),
       );
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Archivo cargado correctamente.')),
-      );
+      showPomgtSnackBar(context, 'Archivo cargado correctamente.');
       _reload();
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(ErrorCopy.message(e))));
+        showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -116,9 +115,7 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
       await launchUrl(Uri.parse(url), webOnlyWindowName: '_blank');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(ErrorCopy.message(e))));
+        showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
       }
     }
   }
@@ -376,6 +373,8 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 640;
     return AlertDialog(
       title: const Row(
         children: [
@@ -385,44 +384,49 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
         ],
       ),
       content: SizedBox(
-        width: 560,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: title,
-              decoration: const InputDecoration(labelText: 'Título *'),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: type,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Tipo de documento *',
+        width: compact ? width - 56 : 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: title,
+                decoration: const InputDecoration(labelText: 'Título *'),
               ),
-              items: widget.types
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: (v) => setState(() => type = v ?? type),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: description,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Descripción / notas',
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Tipo de documento *',
+                ),
+                items: widget.types
+                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                    .toList(),
+                onChanged: (v) => setState(() => type = v ?? type),
               ),
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                widget.filename,
-                style: const TextStyle(color: PomgtColors.muted, fontSize: 12),
+              const SizedBox(height: 14),
+              TextField(
+                controller: description,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción / notas',
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  widget.filename,
+                  style: const TextStyle(
+                    color: PomgtColors.muted,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [

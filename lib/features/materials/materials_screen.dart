@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../core/widgets/linked_documents_panel.dart';
@@ -137,9 +138,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showPomgtSnackBar(context, error.toString(), isError: true);
     }
   }
 
@@ -167,71 +166,147 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
           (row) => row?['id']?.toString() == _selectedId,
           orElse: () => rows.isEmpty ? null : rows.first,
         );
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _Header(onCreate: () => _create(data)),
-              const SizedBox(height: 16),
-              Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: MediaQuery.sizeOf(context).width >= 1280
-                          ? 320
-                          : 300,
-                      child: _MaterialList(
-                        data: data,
-                        rows: rows,
-                        total: data.materials.length,
-                        selectedId: _selectedId,
-                        loading:
-                            snapshot.connectionState == ConnectionState.waiting,
-                        search: _search,
-                        typeFilter: _typeFilter,
-                        categoryFilter: _categoryFilter,
-                        classFilter: _classFilter,
-                        activeFilter: _activeFilter,
-                        onSearch: (value) => setState(() => _search = value),
-                        onType: (value) => setState(() => _typeFilter = value),
-                        onCategory: (value) =>
-                            setState(() => _categoryFilter = value),
-                        onClass: (value) =>
-                            setState(() => _classFilter = value),
-                        onActive: (value) =>
-                            setState(() => _activeFilter = value),
-                        onSelect: (id) => setState(() => _selectedId = id),
-                        onEdit: (material) => _edit(material, data),
-                        onDelete: _delete,
-                        onRefresh: _reload,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: selected == null
-                          ? const _Panel(
-                              child: Center(
-                                child: Text(
-                                  'Selecciona un material para ver su ficha.',
-                                  style: TextStyle(color: PomgtColors.muted),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 900;
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                narrow ? 12 : 16,
+                narrow ? 12 : 18,
+                narrow ? 12 : 16,
+                narrow ? 16 : 24,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _Header(onCreate: () => _create(data)),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: narrow
+                        ? Column(
+                            children: [
+                              SizedBox(
+                                height: (constraints.maxHeight * .35).clamp(
+                                  240.0,
+                                  340.0,
+                                ),
+                                child: _MaterialList(
+                                  data: data,
+                                  rows: rows,
+                                  total: data.materials.length,
+                                  selectedId: _selectedId,
+                                  loading:
+                                      snapshot.connectionState ==
+                                      ConnectionState.waiting,
+                                  search: _search,
+                                  typeFilter: _typeFilter,
+                                  categoryFilter: _categoryFilter,
+                                  classFilter: _classFilter,
+                                  activeFilter: _activeFilter,
+                                  onSearch: (value) =>
+                                      setState(() => _search = value),
+                                  onType: (value) =>
+                                      setState(() => _typeFilter = value),
+                                  onCategory: (value) =>
+                                      setState(() => _categoryFilter = value),
+                                  onClass: (value) =>
+                                      setState(() => _classFilter = value),
+                                  onActive: (value) =>
+                                      setState(() => _activeFilter = value),
+                                  onSelect: (id) =>
+                                      setState(() => _selectedId = id),
+                                  onEdit: (material) => _edit(material, data),
+                                  onDelete: _delete,
+                                  onRefresh: _reload,
                                 ),
                               ),
-                            )
-                          : _MaterialDetail(
-                              key: ValueKey(selected['id']),
-                              material: selected,
-                              data: data,
-                              onEdit: () => _edit(selected, data),
-                              onDelete: () => _delete(selected),
-                              onChanged: _reload,
-                            ),
-                    ),
-                  ],
-                ),
+                              const SizedBox(height: 12),
+                              Expanded(
+                                child: selected == null
+                                    ? const _Panel(
+                                        child: Center(
+                                          child: Text(
+                                            'Selecciona un material para ver su ficha.',
+                                            style: TextStyle(
+                                              color: PomgtColors.muted,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : _MaterialDetail(
+                                        key: ValueKey(selected['id']),
+                                        material: selected,
+                                        data: data,
+                                        onEdit: () => _edit(selected, data),
+                                        onDelete: () => _delete(selected),
+                                        onChanged: _reload,
+                                      ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              SizedBox(
+                                width: constraints.maxWidth >= 1280 ? 320 : 300,
+                                child: _MaterialList(
+                                  data: data,
+                                  rows: rows,
+                                  total: data.materials.length,
+                                  selectedId: _selectedId,
+                                  loading:
+                                      snapshot.connectionState ==
+                                      ConnectionState.waiting,
+                                  search: _search,
+                                  typeFilter: _typeFilter,
+                                  categoryFilter: _categoryFilter,
+                                  classFilter: _classFilter,
+                                  activeFilter: _activeFilter,
+                                  onSearch: (value) =>
+                                      setState(() => _search = value),
+                                  onType: (value) =>
+                                      setState(() => _typeFilter = value),
+                                  onCategory: (value) =>
+                                      setState(() => _categoryFilter = value),
+                                  onClass: (value) =>
+                                      setState(() => _classFilter = value),
+                                  onActive: (value) =>
+                                      setState(() => _activeFilter = value),
+                                  onSelect: (id) =>
+                                      setState(() => _selectedId = id),
+                                  onEdit: (material) => _edit(material, data),
+                                  onDelete: _delete,
+                                  onRefresh: _reload,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: selected == null
+                                    ? const _Panel(
+                                        child: Center(
+                                          child: Text(
+                                            'Selecciona un material para ver su ficha.',
+                                            style: TextStyle(
+                                              color: PomgtColors.muted,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : _MaterialDetail(
+                                        key: ValueKey(selected['id']),
+                                        material: selected,
+                                        data: data,
+                                        onEdit: () => _edit(selected, data),
+                                        onDelete: () => _delete(selected),
+                                        onChanged: _reload,
+                                      ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -467,28 +542,41 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   Widget build(BuildContext context) {
     final typeName =
         widget.data.typeById[_typeId]?['name']?.toString() ?? 'material';
+    final screen = MediaQuery.sizeOf(context);
+    final compact = screen.width < 640;
     return Dialog(
-      insetPadding: const EdgeInsets.all(24),
+      insetPadding: EdgeInsets.all(compact ? 10 : 24),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 980,
-          maxHeight: MediaQuery.sizeOf(context).height * .9,
+          maxWidth: compact ? screen.width - 20 : 980,
+          maxHeight: screen.height * (compact ? .96 : .9),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 24, 28, 20),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 16 : 28,
+            compact ? 16 : 24,
+            compact ? 16 : 28,
+            compact ? 14 : 20,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Icon(
                     editing ? CupertinoIcons.pencil : CupertinoIcons.add,
                     color: PomgtColors.ink,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: compact ? screen.width - 92 : 780,
+                    ),
                     child: Text(
                       editing ? 'Editar material' : 'Nuevo material',
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
@@ -603,14 +691,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 ),
               ],
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   TextButton(
                     onPressed: _saving ? null : () => Navigator.pop(context),
                     child: const Text('Cancelar'),
                   ),
-                  const SizedBox(width: 10),
                   FilledButton.icon(
                     onPressed: _saving ? null : _save,
                     icon: _saving
@@ -1281,29 +1370,50 @@ class _Header extends StatelessWidget {
   final VoidCallback onCreate;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: Row(
-          children: [
-            Text(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 720;
+      final titleBlock = Row(
+        mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+        children: [
+          Flexible(
+            child: Text(
               'Materiales',
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.headlineMedium,
             ),
-            const SizedBox(width: 8),
-            const InfoTip(
-              'Catálogo maestro de materiales basado en products con especificaciones por tipo de material.',
-              size: 18,
-            ),
-          ],
-        ),
-      ),
-      FilledButton.icon(
+          ),
+          const SizedBox(width: 8),
+          const InfoTip(
+            'Catálogo maestro de materiales basado en products con especificaciones por tipo de material.',
+            size: 18,
+          ),
+        ],
+      );
+      final button = FilledButton.icon(
         onPressed: onCreate,
         icon: const Icon(CupertinoIcons.add, size: 18),
         label: const Text('Nuevo material'),
-      ),
-    ],
+      );
+
+      if (compact) {
+        return Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [titleBlock, button],
+        );
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: 18),
+          button,
+        ],
+      );
+    },
   );
 }
 

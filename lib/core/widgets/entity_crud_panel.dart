@@ -10,6 +10,7 @@ import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import '../theme/pomgt_theme.dart';
+import '../utils/app_notice.dart';
 import '../utils/ui_copy.dart';
 import '../utils/error_copy.dart';
 import 'empty_state.dart';
@@ -156,9 +157,7 @@ class _EntityCrudPanelState extends State<EntityCrudPanel> {
       widget.onChanged?.call();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_friendlyError(e))));
+      showPomgtSnackBar(context, _friendlyError(e), isError: true);
     }
   }
 
@@ -606,49 +605,64 @@ class _EntityFormDialogState extends State<EntityFormDialog> {
         widget.description ??
         UiCopy.tableDescription(widget.spec.table, widget.spec.description);
     final media = MediaQuery.sizeOf(context);
+    final compact = media.width < 640;
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 24,
+        vertical: compact ? 10 : 24,
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 880,
-          maxHeight: media.height * .90,
+          maxWidth: compact ? media.width - 20 : 880,
+          maxHeight: media.height * (compact ? .96 : .90),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 16 : 30,
+            compact ? 16 : 24,
+            compact ? 16 : 30,
+            compact ? 14 : 22,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.only(top: 2, right: 13),
+                    padding: const EdgeInsets.only(top: 2),
                     child: Icon(
                       widget.icon ?? _iconForTable(widget.spec.table),
                       size: 25,
                       color: PomgtColors.ink,
                     ),
                   ),
-                  Expanded(
+                  SizedBox(
+                    width: compact ? media.width - 96 : 720,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            Flexible(
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: compact ? media.width - 122 : 650,
+                              ),
                               child: Text(
                                 title,
+                                overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: -0.5,
-                                    ),
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                             ),
                             if (description.isNotEmpty) ...[
-                              const SizedBox(width: 8),
                               InfoTip(description, size: 16),
                             ],
                           ],
@@ -753,15 +767,16 @@ class _EntityFormDialogState extends State<EntityFormDialog> {
                 ),
               ],
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   PomgtButton(
                     label: 'Cancelar',
                     primary: false,
                     onPressed: _saving ? null : () => Navigator.pop(context),
                   ),
-                  const SizedBox(width: 10),
                   PomgtButton(
                     label: editing ? 'Guardar cambios' : 'Crear',
                     icon: editing ? Icons.save_outlined : Icons.add_rounded,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/info_tip.dart';
@@ -113,8 +114,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final data = (snapshot.data ?? _DashboardData.empty()).filter(
                 query,
               );
+              final compact = MediaQuery.sizeOf(context).width < 640;
               return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(28, 22, 28, 28),
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 12 : 28,
+                  compact ? 14 : 22,
+                  compact ? 12 : 28,
+                  compact ? 16 : 28,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -202,9 +209,10 @@ class _DashboardTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 28),
+      height: compact ? 64 : 72,
+      padding: EdgeInsets.fromLTRB(compact ? 64 : 28, 0, compact ? 12 : 28, 0),
       decoration: const BoxDecoration(
         color: PomgtColors.canvas,
         border: Border(bottom: BorderSide(color: PomgtColors.line)),
@@ -217,7 +225,7 @@ class _DashboardTopBar extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 620),
                 child: SizedBox(
-                  height: 56,
+                  height: compact ? 46 : 56,
                   child: TextField(
                     controller: controller,
                     onChanged: onChanged,
@@ -228,10 +236,7 @@ class _DashboardTopBar extends StatelessWidget {
                     ),
                     decoration: InputDecoration(
                       hintText: 'Buscar clientes, pedidos o productos',
-                      prefixIcon: const Icon(
-                        CupertinoIcons.search,
-                        size: 20,
-                      ),
+                      prefixIcon: const Icon(CupertinoIcons.search, size: 20),
                       suffixIcon: query.isEmpty
                           ? null
                           : IconButton(
@@ -256,24 +261,25 @@ class _DashboardTopBar extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Notificaciones',
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No hay notificaciones nuevas.')),
-            ),
+            onPressed: () =>
+                showPomgtSnackBar(context, 'No hay notificaciones nuevas.'),
             icon: const Icon(CupertinoIcons.bell, color: PomgtColors.muted),
           ),
-          const SizedBox(width: 12),
-          Container(width: 1, height: 26, color: PomgtColors.line),
-          const SizedBox(width: 18),
-          const Text(
-            'BajaLabel',
-            style: TextStyle(
-              color: PomgtColors.ink,
-              fontWeight: FontWeight.w600,
+          if (!compact) ...[
+            const SizedBox(width: 12),
+            Container(width: 1, height: 26, color: PomgtColors.line),
+            const SizedBox(width: 18),
+            const Text(
+              'BajaLabel',
+              style: TextStyle(
+                color: PomgtColors.ink,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(CupertinoIcons.chevron_down, size: 14),
-          const SizedBox(width: 18),
+            const SizedBox(width: 8),
+            const Icon(CupertinoIcons.chevron_down, size: 14),
+            const SizedBox(width: 18),
+          ],
           SizedBox(
             width: 40,
             height: 40,
@@ -761,19 +767,25 @@ class _KpiBoard extends StatelessWidget {
               ? 6
               : constraints.maxWidth >= 920
               ? 4
-              : constraints.maxWidth >= 620
-              ? 2
-              : 1;
-          final itemWidth = (constraints.maxWidth - (columns - 1)) / columns;
+              : 2;
+          final compactTiles = constraints.maxWidth < 920;
+          final spacing = compactTiles ? 10.0 : 0.0;
+          final itemWidth =
+              (constraints.maxWidth - spacing * (columns - 1)) / columns;
           return Wrap(
-            runSpacing: 12,
+            spacing: spacing,
+            runSpacing: compactTiles ? 10 : 12,
             children: [
               for (var i = 0; i < kpis.length; i++)
                 SizedBox(
                   width: itemWidth,
                   child: _KpiTile(
                     kpi: kpis[i],
-                    showDivider: columns > 1 && i % columns != columns - 1,
+                    compact: compactTiles,
+                    showDivider:
+                        !compactTiles &&
+                        columns > 1 &&
+                        i % columns != columns - 1,
                   ),
                 ),
             ],
@@ -785,69 +797,131 @@ class _KpiBoard extends StatelessWidget {
 }
 
 class _KpiTile extends StatelessWidget {
-  const _KpiTile({required this.kpi, required this.showDivider});
+  const _KpiTile({
+    required this.kpi,
+    required this.showDivider,
+    required this.compact,
+  });
   final _Kpi kpi;
   final bool showDivider;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 82,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: compact ? 122 : 82,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 14,
+        vertical: compact ? 12 : 0,
+      ),
       decoration: BoxDecoration(
+        color: compact ? PomgtColors.surfaceAlt : null,
+        borderRadius: compact ? PomgtRadii.borderSm : null,
         border: Border(
+          top: compact
+              ? BorderSide(color: PomgtColors.lineStrong.withValues(alpha: .35))
+              : BorderSide.none,
+          left: compact
+              ? BorderSide(color: PomgtColors.lineStrong.withValues(alpha: .35))
+              : BorderSide.none,
           right: showDivider
               ? BorderSide(color: PomgtColors.lineStrong.withValues(alpha: .45))
+              : compact
+              ? BorderSide(color: PomgtColors.lineStrong.withValues(alpha: .35))
+              : BorderSide.none,
+          bottom: compact
+              ? BorderSide(color: PomgtColors.lineStrong.withValues(alpha: .35))
               : BorderSide.none,
         ),
       ),
-      child: Row(
-        children: [
-          Icon(kpi.icon, color: kpi.color, size: 28),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      child: compact
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  kpi.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: PomgtColors.muted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+                Row(
+                  children: [
+                    Icon(kpi.icon, color: kpi.color, size: 22),
+                    const SizedBox(width: 8),
+                    Expanded(child: _KpiLabel(kpi.label)),
+                  ],
                 ),
-                const SizedBox(height: 4),
+                const Spacer(),
                 Text(
                   '${kpi.value}${kpi.suffix}',
                   style: const TextStyle(
                     color: PomgtColors.ink,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
                     height: 1,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  kpi.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: PomgtColors.muted,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w400,
+                const SizedBox(height: 7),
+                _KpiCaption(kpi.caption),
+              ],
+            )
+          : Row(
+              children: [
+                Icon(kpi.icon, color: kpi.color, size: 28),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _KpiLabel(kpi.label),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${kpi.value}${kpi.suffix}',
+                        style: const TextStyle(
+                          color: PomgtColors.ink,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          height: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _KpiCaption(kpi.caption),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
+}
+
+class _KpiLabel extends StatelessWidget {
+  const _KpiLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: const TextStyle(
+      color: PomgtColors.muted,
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+    ),
+  );
+}
+
+class _KpiCaption extends StatelessWidget {
+  const _KpiCaption(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: const TextStyle(
+      color: PomgtColors.muted,
+      fontSize: 12.5,
+      fontWeight: FontWeight.w400,
+    ),
+  );
 }
 
 class _ChartGrid extends StatelessWidget {
@@ -1599,34 +1673,42 @@ class _RecentOrdersTable extends StatelessWidget {
         child: _EmptyDashboardMessage(text: 'Sin órdenes recientes.'),
       );
     }
-    return ClipRRect(
-      borderRadius: PomgtRadii.borderSm,
-      child: Table(
-        columnWidths: const {
-          0: FlexColumnWidth(.75),
-          1: FlexColumnWidth(1.2),
-          2: FlexColumnWidth(1.25),
-          3: FlexColumnWidth(.8),
-          4: FlexColumnWidth(.95),
-          5: FlexColumnWidth(.95),
-          6: FlexColumnWidth(1.05),
-          7: FlexColumnWidth(1.05),
-          8: FlexColumnWidth(.45),
-        },
-        children: [
-          _tableRow([
-            'OP',
-            'Producto',
-            'Cliente',
-            'Cantidad',
-            'Estado',
-            'Fecha inicio',
-            'Fecha compromiso',
-            'Avance',
-            'Acciones',
-          ], header: true),
-          for (final row in rows) _orderRow(row),
-        ],
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: constraints.maxWidth < 980 ? 980 : constraints.maxWidth,
+          child: ClipRRect(
+            borderRadius: PomgtRadii.borderSm,
+            child: Table(
+              columnWidths: const {
+                0: FlexColumnWidth(.75),
+                1: FlexColumnWidth(1.2),
+                2: FlexColumnWidth(1.25),
+                3: FlexColumnWidth(.8),
+                4: FlexColumnWidth(.95),
+                5: FlexColumnWidth(.95),
+                6: FlexColumnWidth(1.05),
+                7: FlexColumnWidth(1.05),
+                8: FlexColumnWidth(.45),
+              },
+              children: [
+                _tableRow([
+                  'OP',
+                  'Producto',
+                  'Cliente',
+                  'Cantidad',
+                  'Estado',
+                  'Fecha inicio',
+                  'Fecha compromiso',
+                  'Avance',
+                  'Acciones',
+                ], header: true),
+                for (final row in rows) _orderRow(row),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

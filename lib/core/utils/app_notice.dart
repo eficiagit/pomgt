@@ -3,6 +3,19 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../theme/pomgt_theme.dart';
 
+void showPomgtSnackBar(
+  BuildContext context,
+  String message, {
+  bool isError = false,
+}) {
+  showPomgtNotice(
+    context,
+    title: isError ? 'No fue posible completar la acción.' : message,
+    description: isError ? message : 'Cambio registrado correctamente.',
+    isError: isError,
+  );
+}
+
 void showPomgtNotice(
   BuildContext context, {
   required String title,
@@ -22,7 +35,7 @@ void showPomgtNotice(
   entry = OverlayEntry(
     builder: (context) {
       final media = MediaQuery.of(context);
-      final width = media.size.width < 560 ? media.size.width - 28 : 560.0;
+      final width = media.size.width < 460 ? media.size.width - 28 : 420.0;
       return Positioned(
         top: media.padding.top + 18,
         right: 14,
@@ -54,10 +67,18 @@ void showPomgtNotice(
                   boxShadow: PomgtShadows.card,
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 20, 10, 20),
+                  padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Icon(
+                        isError
+                            ? CupertinoIcons.exclamationmark_triangle_fill
+                            : CupertinoIcons.bell_fill,
+                        color: isError ? PomgtColors.rose : PomgtColors.blue,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -67,22 +88,22 @@ void showPomgtNotice(
                               title,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 20,
-                                height: 1.2,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 14.5,
+                                height: 1.18,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                             if (description != null &&
                                 description.trim().isNotEmpty) ...[
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 4),
                               Text(
                                 description,
-                                maxLines: 4,
+                                maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: PomgtColors.subtle,
-                                  fontSize: 14,
-                                  height: 1.35,
+                                  fontSize: 12,
+                                  height: 1.25,
                                 ),
                               ),
                             ],
@@ -96,11 +117,11 @@ void showPomgtNotice(
                           icon: const Icon(
                             CupertinoIcons.xmark,
                             color: PomgtColors.subtle,
-                            size: 18,
+                            size: 16,
                           ),
                           constraints: const BoxConstraints.tightFor(
-                            width: 32,
-                            height: 32,
+                            width: 28,
+                            height: 28,
                           ),
                         ),
                       ),

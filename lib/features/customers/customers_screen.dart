@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/detail_sections.dart';
 import '../../core/utils/error_copy.dart';
@@ -96,9 +97,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showPomgtSnackBar(context, error.toString(), isError: true);
     }
   }
 
@@ -229,14 +228,6 @@ class _CustomersTitle extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-      Text(
-        _customerLongDate(DateTime.now()),
-        style: const TextStyle(
-          color: PomgtColors.muted,
-          fontSize: 12.5,
-          fontWeight: FontWeight.w800,
         ),
       ),
       const SizedBox(width: 18),
@@ -1325,19 +1316,6 @@ String _customerShortDate(DateTime date) {
     'dic',
   ];
   return '${date.day} ${months[date.month - 1]}';
-}
-
-String _customerLongDate(DateTime date) {
-  const days = [
-    'Lunes',
-    'Martes',
-    'Miércoles',
-    'Jueves',
-    'Viernes',
-    'Sábado',
-    'Domingo',
-  ];
-  return '${days[date.weekday - 1]}, ${date.day} de ${_customerShortDate(date).split(' ').last} de ${date.year}';
 }
 
 class _CustomerDetail extends StatelessWidget {

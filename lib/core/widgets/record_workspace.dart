@@ -7,6 +7,7 @@ import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import '../theme/pomgt_theme.dart';
+import '../utils/app_notice.dart';
 import '../utils/ui_copy.dart';
 import '../utils/error_copy.dart';
 import 'empty_state.dart';
@@ -203,162 +204,216 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
       _reload();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_workspaceFriendlyError(e))));
+      showPomgtSnackBar(context, _workspaceFriendlyError(e), isError: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 18, 32, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    return LayoutBuilder(
+      builder: (context, pageConstraints) {
+        final compact = pageConstraints.maxWidth < 720;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 12 : 32,
+            compact ? 12 : 18,
+            compact ? 12 : 32,
+            compact ? 16 : 32,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                widget.title,
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(width: 8),
-              InfoTip(widget.help, size: 18),
-              const Spacer(),
-              PomgtButton(
-                label: widget.createLabel,
-                icon: CupertinoIcons.add,
-                onPressed: () => _edit(),
+              if (compact)
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            widget.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        InfoTip(widget.help, size: 18),
+                      ],
+                    ),
+                    PomgtButton(
+                      label: widget.createLabel,
+                      icon: CupertinoIcons.add,
+                      onPressed: () => _edit(),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              widget.title,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.headlineMedium,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          InfoTip(widget.help, size: 18),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    PomgtButton(
+                      label: widget.createLabel,
+                      icon: CupertinoIcons.add,
+                      onPressed: () => _edit(),
+                    ),
+                  ],
+                ),
+              SizedBox(height: compact ? 14 : 24),
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: future,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError)
+                      return _WorkspaceError(
+                        error: snapshot.error!,
+                        onRetry: _reload,
+                      );
+                    final rows =
+                        snapshot.data ?? const <Map<String, dynamic>>[];
+                    if (snapshot.connectionState == ConnectionState.waiting &&
+                        rows.isEmpty)
+                      return const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      );
+                    final visibleRows = widget.rowFilter == null
+                        ? rows
+                        : rows.where(widget.rowFilter!).toList();
+                    final filtered = _filter(visibleRows);
+                    if (filtered.isNotEmpty &&
+                        (widget.controller.selectedId == null ||
+                            !filtered.any(
+                              (r) =>
+                                  r['id']?.toString() ==
+                                  widget.controller.selectedId,
+                            ))) {
+                      WidgetsBinding.instance.addPostFrameCallback(
+                        (_) => widget.controller.select(
+                          filtered.first['id']?.toString(),
+                        ),
+                      );
+                    }
+                    final selected = filtered
+                        .cast<Map<String, dynamic>?>()
+                        .firstWhere(
+                          (r) =>
+                              r?['id']?.toString() ==
+                              widget.controller.selectedId,
+                          orElse: () =>
+                              filtered.isEmpty ? null : filtered.first,
+                        );
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        final wide = constraints.maxWidth >= 1040;
+                        if (!wide) {
+                          final listHeight = (constraints.maxHeight * .34)
+                              .clamp(210.0, 320.0);
+                          return Column(
+                            children: [
+                              SizedBox(
+                                height: listHeight,
+                                child: _MasterList(
+                                  spec: spec,
+                                  rows: filtered,
+                                  selectedId: selected?['id']?.toString(),
+                                  search: search,
+                                  onSearch: (v) => setState(() => search = v),
+                                  onSelect: widget.controller.select,
+                                  onEdit: _edit,
+                                  onDelete: widget.enableDelete
+                                      ? _delete
+                                      : null,
+                                  onRefresh: _reload,
+                                  showActions: widget.showRowActions,
+                                  leadingIcon: widget.rowLeadingIcon,
+                                  plainStatus: widget.plainRowStatus,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Expanded(
+                                child: SoftContentSwitch(
+                                  child: selected == null
+                                      ? const _NothingSelected()
+                                      : _DetailSurface(
+                                          key: ValueKey(
+                                            selected['id']?.toString() ??
+                                                selected,
+                                          ),
+                                          child: widget.detailBuilder(
+                                            context,
+                                            selected,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              width: 330,
+                              child: _MasterList(
+                                spec: spec,
+                                rows: filtered,
+                                selectedId: selected?['id']?.toString(),
+                                search: search,
+                                onSearch: (v) => setState(() => search = v),
+                                onSelect: widget.controller.select,
+                                onEdit: _edit,
+                                onDelete: widget.enableDelete ? _delete : null,
+                                onRefresh: _reload,
+                                showActions: widget.showRowActions,
+                                leadingIcon: widget.rowLeadingIcon,
+                                plainStatus: widget.plainRowStatus,
+                              ),
+                            ),
+                            const SizedBox(width: 24),
+                            Expanded(
+                              child: SoftContentSwitch(
+                                child: selected == null
+                                    ? const _NothingSelected()
+                                    : _DetailSurface(
+                                        key: ValueKey(
+                                          selected['id']?.toString() ??
+                                              selected,
+                                        ),
+                                        child: widget.detailBuilder(
+                                          context,
+                                          selected,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: FutureBuilder<List<Map<String, dynamic>>>(
-              future: future,
-              builder: (context, snapshot) {
-                if (snapshot.hasError)
-                  return _WorkspaceError(
-                    error: snapshot.error!,
-                    onRetry: _reload,
-                  );
-                final rows = snapshot.data ?? const <Map<String, dynamic>>[];
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    rows.isEmpty)
-                  return const Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  );
-                final visibleRows = widget.rowFilter == null
-                    ? rows
-                    : rows.where(widget.rowFilter!).toList();
-                final filtered = _filter(visibleRows);
-                if (filtered.isNotEmpty &&
-                    (widget.controller.selectedId == null ||
-                        !filtered.any(
-                          (r) =>
-                              r['id']?.toString() ==
-                              widget.controller.selectedId,
-                        ))) {
-                  WidgetsBinding.instance.addPostFrameCallback(
-                    (_) => widget.controller.select(
-                      filtered.first['id']?.toString(),
-                    ),
-                  );
-                }
-                final selected = filtered
-                    .cast<Map<String, dynamic>?>()
-                    .firstWhere(
-                      (r) =>
-                          r?['id']?.toString() == widget.controller.selectedId,
-                      orElse: () => filtered.isEmpty ? null : filtered.first,
-                    );
-                return LayoutBuilder(
-                  builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 1040;
-                    if (!wide) {
-                      return Column(
-                        children: [
-                          SizedBox(
-                            height: 290,
-                            child: _MasterList(
-                              spec: spec,
-                              rows: filtered,
-                              selectedId: selected?['id']?.toString(),
-                              search: search,
-                              onSearch: (v) => setState(() => search = v),
-                              onSelect: widget.controller.select,
-                              onEdit: _edit,
-                              onDelete: widget.enableDelete ? _delete : null,
-                              onRefresh: _reload,
-                              showActions: widget.showRowActions,
-                              leadingIcon: widget.rowLeadingIcon,
-                              plainStatus: widget.plainRowStatus,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Expanded(
-                            child: SoftContentSwitch(
-                              child: selected == null
-                                  ? const _NothingSelected()
-                                  : _DetailSurface(
-                                      key: ValueKey(
-                                        selected['id']?.toString() ?? selected,
-                                      ),
-                                      child: widget.detailBuilder(
-                                        context,
-                                        selected,
-                                      ),
-                                    ),
-                            ),
-                          ),
-                        ],
-                      );
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          width: 330,
-                          child: _MasterList(
-                            spec: spec,
-                            rows: filtered,
-                            selectedId: selected?['id']?.toString(),
-                            search: search,
-                            onSearch: (v) => setState(() => search = v),
-                            onSelect: widget.controller.select,
-                            onEdit: _edit,
-                            onDelete: widget.enableDelete ? _delete : null,
-                            onRefresh: _reload,
-                            showActions: widget.showRowActions,
-                            leadingIcon: widget.rowLeadingIcon,
-                            plainStatus: widget.plainRowStatus,
-                          ),
-                        ),
-                        const SizedBox(width: 24),
-                        Expanded(
-                          child: SoftContentSwitch(
-                            child: selected == null
-                                ? const _NothingSelected()
-                                : _DetailSurface(
-                                    key: ValueKey(
-                                      selected['id']?.toString() ?? selected,
-                                    ),
-                                    child: widget.detailBuilder(
-                                      context,
-                                      selected,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -385,9 +440,7 @@ class _DetailSurface extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
         borderRadius: PomgtRadii.borderMd,
-        border: Border.all(
-          color: PomgtColors.lineStrong.withValues(alpha: .65),
-        ),
+        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
         boxShadow: PomgtShadows.card,
       ),
       clipBehavior: Clip.antiAlias,
@@ -653,58 +706,96 @@ class DetailHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 18, 19),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 14 : 24,
+        compact ? 14 : 20,
+        compact ? 10 : 18,
+        compact ? 14 : 19,
+      ),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: PomgtColors.line)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final titleBlock = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 7,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (icon != null)
+                    Icon(icon, size: 20, color: PomgtColors.blue),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: compact
+                          ? (constraints.maxWidth - 36).clamp(
+                              0.0,
+                              double.infinity,
+                            )
+                          : constraints.maxWidth * .68,
+                    ),
+                    child: Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  InfoTip(help, size: 16),
+                  if (status != null) StatusPill(status!, plain: plainStatus),
+                ],
+              ),
+              if (subtitle != null && subtitle!.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(
+                  subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: PomgtColors.muted,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ],
+          );
+
+          if (compact) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    if (icon != null) ...[
-                      Icon(icon, size: 20, color: PomgtColors.blue),
-                      const SizedBox(width: 9),
-                    ],
-                    Flexible(
-                      child: Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    InfoTip(help, size: 16),
-                    if (status != null) ...[
-                      const SizedBox(width: 10),
-                      StatusPill(status!, plain: plainStatus),
-                    ],
-                  ],
-                ),
-                if (subtitle != null && subtitle!.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  Text(
-                    subtitle!,
-                    style: const TextStyle(
-                      color: PomgtColors.muted,
-                      fontSize: 12.5,
-                    ),
+                titleBlock,
+                if (onEdit != null) ...[
+                  const SizedBox(height: 10),
+                  IconButton(
+                    tooltip: 'Editar información principal',
+                    onPressed: onEdit,
+                    icon: const Icon(CupertinoIcons.pencil, size: 18),
                   ),
                 ],
               ],
-            ),
-          ),
-          if (onEdit != null)
-            IconButton(
-              tooltip: 'Editar información principal',
-              onPressed: onEdit,
-              icon: const Icon(CupertinoIcons.pencil, size: 18),
-            ),
-        ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              if (onEdit != null) ...[
+                const SizedBox(width: 16),
+                IconButton(
+                  tooltip: 'Editar información principal',
+                  onPressed: onEdit,
+                  icon: const Icon(CupertinoIcons.pencil, size: 18),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -729,10 +820,11 @@ class ChildTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
     if (tabs.length == 1) {
       final t = tabs.first;
       return Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(compact ? 12 : 20),
         child: EntityCrudPanel(
           table: t.table,
           repository: repository,
@@ -751,7 +843,7 @@ class ChildTabs extends StatelessWidget {
         children: [
           Container(
             color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 18),
             child: TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,
@@ -785,7 +877,7 @@ class ChildTabs extends StatelessWidget {
               children: tabs
                   .map(
                     (t) => Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: EdgeInsets.all(compact ? 12 : 20),
                       child: EntityCrudPanel(
                         table: t.table,
                         repository: repository,
@@ -858,8 +950,9 @@ class _NestedRelationPanelState extends State<NestedRelationPanel> {
   @override
   Widget build(BuildContext context) {
     final spec = Phase1Schema.tables[widget.parentTable]!;
+    final compact = MediaQuery.sizeOf(context).width < 640;
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(compact ? 12 : 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -897,9 +990,15 @@ class _NestedRelationPanelState extends State<NestedRelationPanel> {
               return Expanded(
                 child: Column(
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Expanded(
+                        SizedBox(
+                          width: compact
+                              ? double.infinity
+                              : MediaQuery.sizeOf(context).width * .42,
                           child: DropdownButtonFormField<String>(
                             initialValue: current,
                             decoration: InputDecoration(
@@ -920,7 +1019,6 @@ class _NestedRelationPanelState extends State<NestedRelationPanel> {
                             onChanged: (v) => setState(() => selected = v),
                           ),
                         ),
-                        const SizedBox(width: 12),
                         IconButton(
                           tooltip: 'Actualizar',
                           onPressed: reload,

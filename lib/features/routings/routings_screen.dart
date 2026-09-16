@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/entity_crud_panel.dart';
 import '../../core/widgets/info_tip.dart';
@@ -102,96 +103,116 @@ class _RoutingsScreenState extends State<RoutingsScreen> {
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showPomgtSnackBar(context, error.toString(), isError: true);
     }
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) => FutureBuilder<List<Map<String, dynamic>>>(
-    future: future,
-    builder: (context, snapshot) {
-      final rows = snapshot.data ?? const <Map<String, dynamic>>[];
-      final query = search.trim().toLowerCase();
-      final filtered = rows
-          .where(
-            (row) =>
-                query.isEmpty ||
-                row.values.any(
-                  (value) =>
-                      value?.toString().toLowerCase().contains(query) ?? false,
-                ),
-          )
-          .toList();
-      if (filtered.isNotEmpty &&
-          (selectedId == null ||
-              !filtered.any((row) => row['id']?.toString() == selectedId)))
-        selectedId = filtered.first['id']?.toString();
-      final selected = filtered.cast<Map<String, dynamic>?>().firstWhere(
-        (row) => row?['id']?.toString() == selectedId,
-        orElse: () => filtered.isEmpty ? null : filtered.first,
-      );
-      if (snapshot.hasError)
-        return const Center(
-          child: Text(
-            'No fue posible cargar rutas.',
-            style: TextStyle(color: PomgtColors.danger),
-          ),
-        );
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _RoutingTitle(onCreate: () => _edit()),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: MediaQuery.sizeOf(context).width >= 1280 ? 280 : 310,
-                    child: _RoutingList(
-                      rows: filtered,
-                      total: rows.length,
-                      selectedId: selectedId,
-                      search: search,
-                      loading:
-                          snapshot.connectionState == ConnectionState.waiting,
-                      onSearch: (value) => setState(() => search = value),
-                      onSelect: (id) => setState(() => selectedId = id),
-                      onEdit: _edit,
-                      onDelete: _delete,
-                      onRefresh: _reload,
+  Widget build(BuildContext context) =>
+      FutureBuilder<List<Map<String, dynamic>>>(
+        future: future,
+        builder: (context, snapshot) {
+          final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+          final query = search.trim().toLowerCase();
+          final filtered = rows
+              .where(
+                (row) =>
+                    query.isEmpty ||
+                    row.values.any(
+                      (value) =>
+                          value?.toString().toLowerCase().contains(query) ??
+                          false,
                     ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: selected == null
-                        ? const _RoutingPanel(
-                            child: Center(
-                              child: Text(
-                                'Selecciona una ruta para ver su expediente.',
-                                style: TextStyle(color: PomgtColors.muted),
-                              ),
-                            ),
-                          )
-                        : _RoutingOverview(
-                            key: ValueKey(selected['id']),
-                            routing: selected,
-                            onEdit: () => _edit(selected),
-                          ),
-                  ),
-                ],
+              )
+              .toList();
+          if (filtered.isNotEmpty &&
+              (selectedId == null ||
+                  !filtered.any((row) => row['id']?.toString() == selectedId)))
+            selectedId = filtered.first['id']?.toString();
+          final selected = filtered.cast<Map<String, dynamic>?>().firstWhere(
+            (row) => row?['id']?.toString() == selectedId,
+            orElse: () => filtered.isEmpty ? null : filtered.first,
+          );
+          if (snapshot.hasError)
+            return const Center(
+              child: Text(
+                'No fue posible cargar rutas.',
+                style: TextStyle(color: PomgtColors.danger),
               ),
+            );
+          final width = MediaQuery.sizeOf(context).width;
+          final compact = width < 980;
+          final sideWidth = width >= 1280 ? 280.0 : 310.0;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 12 : 16,
+              compact ? 14 : 18,
+              compact ? 12 : 16,
+              compact ? 18 : 24,
             ),
-          ],
-        ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _RoutingTitle(onCreate: () => _edit()),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final list = _RoutingList(
+                        rows: filtered,
+                        total: rows.length,
+                        selectedId: selectedId,
+                        search: search,
+                        loading:
+                            snapshot.connectionState == ConnectionState.waiting,
+                        onSearch: (value) => setState(() => search = value),
+                        onSelect: (id) => setState(() => selectedId = id),
+                        onEdit: _edit,
+                        onDelete: _delete,
+                        onRefresh: _reload,
+                      );
+                      final detail = selected == null
+                          ? const _RoutingPanel(
+                              child: Center(
+                                child: Text(
+                                  'Selecciona una ruta para ver su expediente.',
+                                  style: TextStyle(color: PomgtColors.muted),
+                                ),
+                              ),
+                            )
+                          : _RoutingOverview(
+                              key: ValueKey(selected['id']),
+                              routing: selected,
+                              onEdit: () => _edit(selected),
+                            );
+                      if (constraints.maxWidth < 980) {
+                        final listHeight = (constraints.maxHeight * .36).clamp(
+                          240.0,
+                          360.0,
+                        );
+                        return Column(
+                          children: [
+                            SizedBox(height: listHeight, child: list),
+                            const SizedBox(height: 12),
+                            Expanded(child: detail),
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          SizedBox(width: sideWidth, child: list),
+                          const SizedBox(width: 14),
+                          Expanded(child: detail),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       );
-    },
-  );
 }
 
 class _RoutingDetail extends StatelessWidget {
@@ -929,44 +950,62 @@ class _RoutingTitle extends StatelessWidget {
   const _RoutingTitle({required this.onCreate});
   final VoidCallback onCreate;
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Rutas de fabricación',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(width: 8),
-                const InfoTip(
-                  'Define la secuencia operativa, recursos, tiempos y controles para fabricar cada producto.',
-                  size: 18,
-                ),
-              ],
-            ),
-            const SizedBox(height: 3),
-            const Text(
-              'Define la secuencia operativa, recursos, tiempos y controles para fabricar cada producto.',
-              style: TextStyle(
-                color: PomgtColors.muted,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 720;
+      final titleBlock = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Rutas de fabricación',
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
+              const InfoTip(
+                'Define la secuencia operativa, recursos, tiempos y controles para fabricar cada producto.',
+                size: 18,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Define la secuencia operativa, recursos, tiempos y controles para fabricar cada producto.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: PomgtColors.muted,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-        ),
-      ),
-      FilledButton.icon(
+          ),
+        ],
+      );
+      final button = FilledButton.icon(
         onPressed: onCreate,
         icon: const Icon(CupertinoIcons.add, size: 18),
         label: const Text('Nueva ruta'),
-      ),
-    ],
+      );
+
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [titleBlock, const SizedBox(height: 10), button],
+        );
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: 18),
+          button,
+        ],
+      );
+    },
   );
 }
 
@@ -1080,6 +1119,16 @@ class _RoutingList extends StatelessWidget {
                         ),
                         child: Row(
                           children: [
+                            const SizedBox(
+                              width: 30,
+                              height: 30,
+                              child: Icon(
+                                CupertinoIcons.arrow_branch,
+                                size: 17,
+                                color: PomgtColors.ink,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1253,57 +1302,66 @@ class _RoutingOverview extends StatelessWidget {
                 lookups: lookups,
               ),
               const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: Column(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final first = Column(
+                    children: [
+                      _RoutingSummaryCard(
+                        routing: routing,
+                        revision: revision,
+                        products: products,
+                        lookups: lookups,
+                      ),
+                      const SizedBox(height: 12),
+                      _RoutingParameters(rows: operations),
+                    ],
+                  );
+                  final second = Column(
+                    children: [
+                      _RoutingResourcesCard(
+                        rows: operations,
+                        workCenters: workCenters,
+                        lookups: lookups,
+                      ),
+                      const SizedBox(height: 12),
+                      _RoutingDocuments(rows: data['documents'] ?? const []),
+                    ],
+                  );
+                  final third = Column(
+                    children: [
+                      _RoutingMaterials(
+                        rows: data['materials'] ?? const [],
+                        products: products,
+                        lookups: lookups,
+                      ),
+                      const SizedBox(height: 12),
+                      _RoutingAlerts(rows: data['alerts'] ?? const []),
+                      const SizedBox(height: 12),
+                      _RoutingActivity(rows: operations),
+                    ],
+                  );
+                  if (constraints.maxWidth < 860) {
+                    return Column(
                       children: [
-                        _RoutingSummaryCard(
-                          routing: routing,
-                          revision: revision,
-                          products: products,
-                          lookups: lookups,
-                        ),
+                        first,
                         const SizedBox(height: 12),
-                        _RoutingParameters(rows: operations),
+                        second,
+                        const SizedBox(height: 12),
+                        third,
                       ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 4,
-                    child: Column(
-                      children: [
-                        _RoutingResourcesCard(
-                          rows: operations,
-                          workCenters: workCenters,
-                          lookups: lookups,
-                        ),
-                        const SizedBox(height: 12),
-                        _RoutingDocuments(rows: data['documents'] ?? const []),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      children: [
-                        _RoutingMaterials(
-                          rows: data['materials'] ?? const [],
-                          products: products,
-                          lookups: lookups,
-                        ),
-                        const SizedBox(height: 12),
-                        _RoutingAlerts(rows: data['alerts'] ?? const []),
-                        const SizedBox(height: 12),
-                        _RoutingActivity(rows: operations),
-                      ],
-                    ),
-                  ),
-                ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 4, child: first),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 4, child: second),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 3, child: third),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 12),
               _RoutingActions(routing: routing),
@@ -1380,15 +1438,23 @@ class _RoutingHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _RoutingPanel(
     padding: const EdgeInsets.fromLTRB(18, 16, 12, 14),
-    child: Row(
+    child: Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Expanded(
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 220, maxWidth: 780),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                spacing: 9,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Flexible(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
                     child: Text(
                       routing['name']?.toString() ?? 'Ruta de fabricación',
                       maxLines: 1,
@@ -1416,10 +1482,13 @@ class _RoutingHero extends StatelessWidget {
             ],
           ),
         ),
-        TextButton.icon(
-          onPressed: onEdit,
-          icon: const Icon(CupertinoIcons.pencil, size: 16),
-          label: const Text('Editar ruta'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(CupertinoIcons.pencil, size: 16),
+            label: const Text('Editar ruta'),
+          ),
         ),
       ],
     ),
@@ -1813,25 +1882,31 @@ class _RoutingResourcesCard extends StatelessWidget {
   Widget build(BuildContext context) => _RoutingSection(
     title: 'Recursos y tiempos',
     link: 'Ver detalles',
-    child: Table(
-      columnWidths: const {
-        0: FlexColumnWidth(.6),
-        1: FlexColumnWidth(1.2),
-        2: FlexColumnWidth(1),
-        3: FlexColumnWidth(.8),
-        4: FlexColumnWidth(.8),
-      },
-      children: [
-        _routeHeader(['Op.', 'Operación', 'Centro', 'Setup', 'Tiempo']),
-        for (final row in rows.take(6))
-          _routeRow([
-            row['sequence_no']?.toString() ?? '—',
-            row['name']?.toString() ?? '—',
-            _workCenterName(row['work_center_id']),
-            '${row['setup_time_minutes'] ?? 0} min',
-            '${row['run_time_value'] ?? 0}',
-          ]),
-      ],
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: 620,
+        child: Table(
+          columnWidths: const {
+            0: FlexColumnWidth(.6),
+            1: FlexColumnWidth(1.2),
+            2: FlexColumnWidth(1),
+            3: FlexColumnWidth(.8),
+            4: FlexColumnWidth(.8),
+          },
+          children: [
+            _routeHeader(['Op.', 'Operación', 'Centro', 'Setup', 'Tiempo']),
+            for (final row in rows.take(6))
+              _routeRow([
+                row['sequence_no']?.toString() ?? '—',
+                row['name']?.toString() ?? '—',
+                _workCenterName(row['work_center_id']),
+                '${row['setup_time_minutes'] ?? 0} min',
+                '${row['run_time_value'] ?? 0}',
+              ]),
+          ],
+        ),
+      ),
     ),
   );
 }
@@ -2192,16 +2267,25 @@ class _RoutingActionsState extends State<_RoutingActions> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-                child: Row(
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Expanded(
-                      child: Row(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        minWidth: 220,
+                        maxWidth: 430,
+                      ),
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
                             'Secuencia de fabricación',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
-                          const SizedBox(width: 7),
                           const InfoTip(
                             'La ruta ordena qué operaciones se ejecutan, qué recursos usan y en qué paso se consumen los materiales de la estructura.',
                           ),
@@ -2256,42 +2340,53 @@ class _RoutingActionsState extends State<_RoutingActions> {
               ),
               const Divider(height: 1),
               Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 330,
-                      child: _StepList(
-                        operations: operations,
-                        selectedId: selectedOperation?['id']?.toString(),
-                        onSelect: (id) => setState(() => _operationId = id),
-                        onEdit: _editOperation,
-                      ),
-                    ),
-                    const VerticalDivider(width: 1),
-                    Expanded(
-                      child: selectedOperation == null
-                          ? _EmptyStepList(
-                              onCreate: () => _editOperation(
-                                null,
-                                _revisionId,
-                                data.bomItems,
-                                data.bomRevision,
-                              ),
-                            )
-                          : _StepDetail(
-                              key: ValueKey(selectedOperation['id']),
-                              operation: selectedOperation,
-                              routingProductId: _productId,
-                              bomRevision: data.bomRevision,
-                              bomItems: data.bomItems,
-                              onEdit: () => _editOperation(
-                                selectedOperation,
-                                _revisionId,
-                              ),
-                              onChanged: _reload,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final list = _StepList(
+                      operations: operations,
+                      selectedId: selectedOperation?['id']?.toString(),
+                      onSelect: (id) => setState(() => _operationId = id),
+                      onEdit: _editOperation,
+                    );
+                    final detail = selectedOperation == null
+                        ? _EmptyStepList(
+                            onCreate: () => _editOperation(
+                              null,
+                              _revisionId,
+                              data.bomItems,
+                              data.bomRevision,
                             ),
-                    ),
-                  ],
+                          )
+                        : _StepDetail(
+                            key: ValueKey(selectedOperation['id']),
+                            operation: selectedOperation,
+                            routingProductId: _productId,
+                            bomRevision: data.bomRevision,
+                            bomItems: data.bomItems,
+                            onEdit: () =>
+                                _editOperation(selectedOperation, _revisionId),
+                            onChanged: _reload,
+                          );
+                    if (constraints.maxWidth < 780) {
+                      final listHeight = constraints.maxHeight < 520
+                          ? 170.0
+                          : 220.0;
+                      return Column(
+                        children: [
+                          SizedBox(height: listHeight, child: list),
+                          const Divider(height: 1),
+                          Expanded(child: detail),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        SizedBox(width: 330, child: list),
+                        const VerticalDivider(width: 1),
+                        Expanded(child: detail),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],

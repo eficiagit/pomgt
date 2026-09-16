@@ -124,15 +124,25 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final compact = screen.width < 640;
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 24,
+        vertical: compact ? 10 : 24,
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 860,
-          maxHeight: MediaQuery.sizeOf(context).height * .90,
+          maxWidth: compact ? screen.width - 20 : 860,
+          maxHeight: screen.height * (compact ? .96 : .90),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 16 : 30,
+            compact ? 16 : 24,
+            compact ? 16 : 30,
+            compact ? 14 : 22,
+          ),
           child: FutureBuilder<List<List<Map<String, dynamic>>>>(
             future: _future,
             builder: (context, snapshot) {
@@ -161,8 +171,10 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      crossAxisAlignment: WrapCrossAlignment.start,
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(top: 2),
@@ -172,24 +184,32 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                             color: PomgtColors.ink,
                           ),
                         ),
-                        const SizedBox(width: 13),
-                        Expanded(
+                        SizedBox(
+                          width: compact ? screen.width - 92 : 720,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
-                                  Flexible(
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: compact
+                                          ? screen.width - 122
+                                          : 620,
+                                    ),
                                     child: Text(
                                       _editing
                                           ? 'Editar cliente'
                                           : 'Nuevo cliente',
+                                      overflow: TextOverflow.ellipsis,
                                       style: Theme.of(
                                         context,
                                       ).textTheme.headlineSmall,
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
                                   const InfoTip(
                                     'Crea la ficha maestra del cliente. El código de cliente se genera automáticamente y nunca necesitas capturar identificadores internos.',
                                     size: 16,
@@ -481,8 +501,10 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                       ),
                     ],
                     const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
                         TextButton(
                           onPressed: _saving
@@ -490,7 +512,6 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                               : () => Navigator.pop(context),
                           child: const Text('Cancelar'),
                         ),
-                        const SizedBox(width: 10),
                         FilledButton.icon(
                           onPressed: _saving ? null : _save,
                           icon: _saving

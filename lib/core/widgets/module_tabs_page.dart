@@ -31,24 +31,37 @@ class ModuleTabsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
     return DefaultTabController(
       length: tables.length,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 18, 32, 32),
+        padding: EdgeInsets.fromLTRB(
+          compact ? 12 : 32,
+          compact ? 14 : 18,
+          compact ? 12 : 32,
+          compact ? 18 : 32,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: PomgtColors.ink,
-                    letterSpacing: 0,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: PomgtColors.ink,
+                      letterSpacing: 0,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
                 InfoTip(help, size: 19),
               ],
             ),

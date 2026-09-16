@@ -17,18 +17,31 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final compact = MediaQuery.sizeOf(context).width < 640;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Expanded(
+        SizedBox(
+          width: compact ? double.infinity : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                spacing: 7,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Flexible(
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: compact
+                          ? MediaQuery.sizeOf(context).width - 56
+                          : 640,
+                    ),
                     child: Text(
                       title,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: PomgtColors.ink,
@@ -36,7 +49,6 @@ class SectionHeader extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 7),
                   InfoTip(help),
                 ],
               ),

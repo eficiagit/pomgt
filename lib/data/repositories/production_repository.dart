@@ -24,15 +24,30 @@ class ProductionRepository extends BaseRepository {
     final order = await service.one('v_production_order_workspace', orderId);
     if (order == null) throw StateError('Orden de producción no encontrada.');
 
-    final operations = await service.list(
+    var operations = await service.list(
       'production_order_operations',
       equals: {'production_order_id': orderId},
       orderBy: 'sequence_no',
     );
-    final materials = await service.list(
+    var materials = await service.list(
       'production_order_materials',
       equals: {'production_order_id': orderId},
       orderBy: 'line_no',
+    );
+    if (operations.isEmpty) {
+      operations = await _operationsFromRouting(orderId, order);
+    }
+    if (materials.isEmpty) {
+      materials = await _materialsFromBom(orderId, order);
+    }
+    operations = await _normalizeOperationRows(operations);
+    materials = _normalizeMaterialRows(materials);
+    final routingOperationMaterials = await _routingOperationMaterials(
+      operations,
+    );
+    materials = _mergeDirectOperationMaterials(
+      materials,
+      routingOperationMaterials,
     );
     final checklist = await service.list(
       'production_order_checklist_items',
@@ -137,6 +152,13 @@ class ProductionRepository extends BaseRepository {
         if (row != null) units[uid] = row;
       }
     }
+    final materialRevisions = await _materialRevisions(materials);
+    final materialAttributeValues = await _materialAttributeValues(
+      materialRevisions,
+    );
+    final materialAttributeDefinitions = await _materialAttributeDefinitions(
+      materialAttributeValues,
+    );
 
     for (final check in quality) {
       final uid = check['uom_id']?.toString();
@@ -154,6 +176,10 @@ class ProductionRepository extends BaseRepository {
       'customer': customer,
       'operations': operations,
       'materials': materials,
+      'operation_materials': routingOperationMaterials,
+      'material_revisions': materialRevisions,
+      'material_attribute_values': materialAttributeValues,
+      'material_attribute_definitions': materialAttributeDefinitions,
       'checklist': checklist,
       'quality': quality,
       'parameters': parameters,
@@ -167,6 +193,248 @@ class ProductionRepository extends BaseRepository {
       'products': products,
       'units': units,
     };
+  }
+
+  List<Map<String, dynamic>> _mergeDirectOperationMaterials(
+    List<Map<String, dynamic>> materials,
+    Map<String, List<Map<String, dynamic>>> operationMaterials,
+  ) {
+    final merged = [...materials];
+    final existingBomItems = materials
+        .map((row) => row['bom_item_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final existingProducts = materials
+        .map((row) => row['material_product_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    for (final link in operationMaterials.values.expand((rows) => rows)) {
+      final bomItemId = link['bom_item_id']?.toString();
+      final productId = link['material_product_id']?.toString();
+      final alreadyIncluded =
+          (bomItemId != null && existingBomItems.contains(bomItemId)) ||
+          (bomItemId == null &&
+              productId != null &&
+              existingProducts.contains(productId));
+      if (alreadyIncluded) continue;
+      merged.add({
+        'id': 'routing-material:${link['id']}',
+        'production_order_id': null,
+        'routing_operation_material_id': link['id'],
+        'bom_item_id': link['bom_item_id'],
+        'line_no': merged.length + 1,
+        'component_type': 'material',
+        'material_product_id': link['material_product_id'],
+        'uom_id': link['uom_id'],
+        'required_quantity': link['quantity_override'],
+        'issued_quantity': 0,
+        'consumed_quantity': 0,
+        'scrap_quantity': 0,
+        'issue_method': link['consumption_point'],
+        'status': 'planned',
+        'notes': link['notes'],
+      });
+      if (bomItemId != null) existingBomItems.add(bomItemId);
+      if (productId != null) existingProducts.add(productId);
+    }
+    return merged;
+  }
+
+  Future<List<Map<String, dynamic>>> _normalizeOperationRows(
+    List<Map<String, dynamic>> operations,
+  ) async {
+    final normalized = <Map<String, dynamic>>[];
+    for (final row in operations) {
+      final copy = Map<String, dynamic>.from(row);
+      copy['routing_operation_id'] ??= copy['source_routing_operation_id'];
+      if (copy['operation_type'] == null) {
+        final sourceId = copy['source_routing_operation_id']?.toString();
+        if (sourceId != null && sourceId.isNotEmpty) {
+          final routingOperation = await service.one(
+            'routing_operations',
+            sourceId,
+          );
+          copy['operation_type'] =
+              routingOperation?['operation_type']?.toString() ?? 'activity';
+        } else {
+          copy['operation_type'] = 'activity';
+        }
+      }
+      normalized.add(copy);
+    }
+    return normalized;
+  }
+
+  List<Map<String, dynamic>> _normalizeMaterialRows(
+    List<Map<String, dynamic>> materials,
+  ) {
+    return materials.map((row) {
+      final copy = Map<String, dynamic>.from(row);
+      copy['bom_item_id'] ??= copy['source_bom_item_id'];
+      return copy;
+    }).toList();
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> _routingOperationMaterials(
+    List<Map<String, dynamic>> operations,
+  ) async {
+    final byOperation = <String, List<Map<String, dynamic>>>{};
+    for (final op in operations) {
+      final routingOperationId = op['routing_operation_id']?.toString();
+      if (routingOperationId == null || routingOperationId.isEmpty) continue;
+      final rows = await service.list(
+        'routing_operation_materials',
+        equals: {'routing_operation_id': routingOperationId},
+        orderBy: 'consumption_point',
+      );
+      if (rows.isNotEmpty) {
+        byOperation[routingOperationId] = rows;
+      }
+    }
+    return byOperation;
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _materialRevisions(
+    List<Map<String, dynamic>> materials,
+  ) async {
+    final revisions = <String, Map<String, dynamic>>{};
+    final materialIds = materials
+        .map((row) => row['material_product_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    for (final materialId in materialIds) {
+      final rows = await listTenant(
+        'product_revisions',
+        filters: {'product_id': materialId},
+        orderBy: 'revision_no',
+      );
+      if (rows.isEmpty) continue;
+      final active = rows.cast<Map<String, dynamic>?>().firstWhere(
+        (row) => row?['status'] == 'active',
+        orElse: () => rows.last,
+      );
+      if (active != null) {
+        revisions[materialId] = Map<String, dynamic>.from(active);
+      }
+    }
+    return revisions;
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> _materialAttributeValues(
+    Map<String, Map<String, dynamic>> materialRevisions,
+  ) async {
+    final values = <String, List<Map<String, dynamic>>>{};
+    for (final entry in materialRevisions.entries) {
+      final revisionId = entry.value['id']?.toString();
+      if (revisionId == null || revisionId.isEmpty) continue;
+      final rows = await listTenant(
+        'material_revision_attribute_values',
+        filters: {'product_revision_id': revisionId},
+      );
+      values[entry.key] = rows;
+    }
+    return values;
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _materialAttributeDefinitions(
+    Map<String, List<Map<String, dynamic>>> valuesByMaterial,
+  ) async {
+    final definitions = <String, Map<String, dynamic>>{};
+    final definitionIds = valuesByMaterial.values
+        .expand((rows) => rows)
+        .map((row) => row['attribute_definition_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    for (final id in definitionIds) {
+      final row = await service.one('material_attribute_definitions', id);
+      if (row != null) definitions[id] = row;
+    }
+    return definitions;
+  }
+
+  Future<List<Map<String, dynamic>>> _operationsFromRouting(
+    String orderId,
+    Map<String, dynamic> order,
+  ) async {
+    final routingRevisionId = order['routing_revision_id']?.toString();
+    if (routingRevisionId == null || routingRevisionId.isEmpty) return [];
+
+    final rows = await service.list(
+      'routing_operations',
+      equals: {'routing_revision_id': routingRevisionId},
+      orderBy: 'sequence_no',
+    );
+    final plannedQuantity = _number(order['planned_quantity']);
+    return rows.map((row) {
+      final setupMinutes = _number(row['setup_time_minutes']);
+      final runMinutes = row['run_time_basis'] == 'per_unit'
+          ? _number(row['run_time_value']) * plannedQuantity
+          : _number(row['run_time_value']);
+      return <String, dynamic>{
+        'id': 'routing:${row['id']}',
+        'production_order_id': orderId,
+        'routing_operation_id': row['id'],
+        'operation_code': row['operation_code'],
+        'sequence_no': row['sequence_no'],
+        'operation_type': row['operation_type'],
+        'name': row['name'],
+        'description': row['description'],
+        'work_center_id': row['work_center_id'],
+        'machine_id': row['preferred_machine_id'],
+        'setup_time_minutes': setupMinutes,
+        'run_time_minutes': runMinutes,
+        'planned_quantity': plannedQuantity,
+        'completed_quantity': 0,
+        'rejected_quantity': 0,
+        'status': 'planned',
+        'instructions': row['instructions'],
+        'notes': row['notes'],
+      };
+    }).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _materialsFromBom(
+    String orderId,
+    Map<String, dynamic> order,
+  ) async {
+    final bomRevisionId = order['bom_revision_id']?.toString();
+    if (bomRevisionId == null || bomRevisionId.isEmpty) return [];
+
+    final rows = await service.list(
+      'bom_items',
+      equals: {'bom_revision_id': bomRevisionId},
+      orderBy: 'line_no',
+    );
+    final plannedQuantity = _number(order['planned_quantity']);
+    return rows.map((row) {
+      final quantity = _number(row['quantity']);
+      final requiredQuantity = row['quantity_basis'] == 'fixed'
+          ? quantity
+          : quantity * plannedQuantity;
+      final scrapPct = _number(row['scrap_pct']);
+      return <String, dynamic>{
+        'id': 'bom:${row['id']}',
+        'production_order_id': orderId,
+        'bom_item_id': row['id'],
+        'line_no': row['line_no'],
+        'component_type': row['component_type'],
+        'material_product_id': row['component_product_id'],
+        'material_product_revision_id': row['component_product_revision_id'],
+        'uom_id': row['uom_id'],
+        'required_quantity': requiredQuantity * (1 + scrapPct / 100),
+        'issued_quantity': 0,
+        'consumed_quantity': 0,
+        'scrap_quantity': 0,
+        'issue_method': row['issue_method'],
+        'status': 'planned',
+        'notes': row['notes'],
+      };
+    }).toList();
+  }
+
+  double _number(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   Future<Map<String, dynamic>> createManual({
@@ -237,6 +505,130 @@ class ProductionRepository extends BaseRepository {
     return await service.one('v_production_order_workspace', orderId) ??
         await service.one('production_orders', orderId) ??
         <String, dynamic>{'id': orderId, 'status': 'ready'};
+  }
+
+  Future<Map<String, dynamic>> ensureOperationalSnapshot(String orderId) async {
+    var order =
+        await service.one('v_production_order_workspace', orderId) ??
+        await service.one('production_orders', orderId);
+    if (order == null) throw StateError('Orden de producción no encontrada.');
+    final status = order['status']?.toString();
+    if (status == 'draft' || status == 'planned' || status == 'ready') {
+      await prepare(orderId);
+      order =
+          await service.one('v_production_order_workspace', orderId) ??
+          await service.one('production_orders', orderId);
+      if (order == null) throw StateError('Orden de producción no encontrada.');
+    }
+
+    var operations = await service.list(
+      'production_order_operations',
+      equals: {'production_order_id': orderId},
+      orderBy: 'sequence_no',
+    );
+    if (operations.isEmpty) {
+      final routingRevisionId = order['routing_revision_id']?.toString();
+      if (routingRevisionId == null || routingRevisionId.isEmpty) {
+        throw StateError('La OP no tiene ruta de fabricación asignada.');
+      }
+      final routingOperations = await service.list(
+        'routing_operations',
+        equals: {'routing_revision_id': routingRevisionId},
+        orderBy: 'sequence_no',
+      );
+      if (routingOperations.isEmpty) {
+        throw StateError('La ruta de fabricación no tiene operaciones.');
+      }
+      final plannedQuantity = _number(order['planned_quantity']);
+      final rows = routingOperations.map((row) {
+        final setupMinutes = _number(row['setup_time_minutes']);
+        return tenantValues({
+          'production_order_id': orderId,
+          'source_routing_operation_id': row['id'],
+          'operation_code': row['operation_code'],
+          'sequence_no': row['sequence_no'],
+          'name': row['name'],
+          'description': row['description'],
+          'work_center_id': row['work_center_id'],
+          'machine_id': row['preferred_machine_id'],
+          'process_definition_id': row['process_definition_id'],
+          'setup_time_minutes': setupMinutes,
+          'run_time_basis': row['run_time_basis'],
+          'run_time_value': row['run_time_value'],
+          'run_time_formula': row['run_time_formula'],
+          'queue_time_minutes': row['queue_time_minutes'] ?? 0,
+          'move_time_minutes': row['move_time_minutes'] ?? 0,
+          'expected_scrap_pct': row['expected_scrap_pct'] ?? 0,
+          'expected_yield_pct': row['expected_yield_pct'] ?? 100,
+          'requires_checklist': row['requires_checklist'] ?? false,
+          'requires_quality': row['requires_quality'] ?? false,
+          'external_service': row['external_service'] ?? false,
+          'planned_quantity': plannedQuantity,
+          'completed_quantity': 0,
+          'rejected_quantity': 0,
+          'status': 'ready',
+          'instructions': row['instructions'],
+          'notes': row['notes'],
+        });
+      }).toList();
+      operations = await service.insertMany(
+        'production_order_operations',
+        rows,
+      );
+    }
+
+    final materials = await service.list(
+      'production_order_materials',
+      equals: {'production_order_id': orderId},
+      orderBy: 'line_no',
+    );
+    if (materials.isEmpty) {
+      final bomRevisionId = order['bom_revision_id']?.toString();
+      if (bomRevisionId == null || bomRevisionId.isEmpty) {
+        throw StateError('La OP no tiene lista de materiales asignada.');
+      }
+      final bomItems = await service.list(
+        'bom_items',
+        equals: {'bom_revision_id': bomRevisionId},
+        orderBy: 'line_no',
+      );
+      if (bomItems.isNotEmpty) {
+        final plannedQuantity = _number(order['planned_quantity']);
+        final rows = bomItems.map((row) {
+          final quantity = _number(row['quantity']);
+          final requiredQuantity = row['quantity_basis'] == 'fixed'
+              ? quantity
+              : quantity * plannedQuantity;
+          final scrapPct = _number(row['scrap_pct']);
+          return tenantValues({
+            'production_order_id': orderId,
+            'source_bom_item_id': row['id'],
+            'line_no': row['line_no'],
+            'component_type': row['component_type'],
+            'material_product_id': row['component_product_id'],
+            'material_product_revision_id':
+                row['component_product_revision_id'],
+            'uom_id': row['uom_id'],
+            'quantity_basis': row['quantity_basis'],
+            'quantity_per_basis': row['quantity'],
+            'quantity_formula': row['quantity_formula'],
+            'required_quantity': requiredQuantity * (1 + scrapPct / 100),
+            'issued_quantity': 0,
+            'consumed_quantity': 0,
+            'returned_quantity': 0,
+            'scrap_quantity': 0,
+            'scrap_pct': scrapPct,
+            'issue_method': row['issue_method'],
+            'is_optional': row['is_optional'] ?? false,
+            'is_phantom': row['is_phantom'] ?? false,
+            'notes': row['notes'],
+          });
+        }).toList();
+        await service.insertMany('production_order_materials', rows);
+      }
+    }
+
+    return detail(orderId);
   }
 
   Future<void> _alignOrderUomWithBom(String orderId) async {
@@ -319,19 +711,80 @@ class ProductionRepository extends BaseRepository {
       return current ??
           <String, dynamic>{'id': operationId, 'status': newStatus};
     }
-    final result = await service.rpc(
-      'transition_production_operation',
-      params: {
-        'p_operation_id': operationId,
-        'p_new_status': newStatus,
-        'p_completed_quantity': completedQuantity,
-        'p_rejected_quantity': rejectedQuantity,
-        'p_note': note,
-      },
-    );
-    if (result is Map) return Map<String, dynamic>.from(result);
+    try {
+      final result = await service.rpc(
+        'transition_production_operation',
+        params: {
+          'p_operation_id': operationId,
+          'p_new_status': newStatus,
+          'p_completed_quantity': completedQuantity,
+          'p_rejected_quantity': rejectedQuantity,
+          'p_note': note,
+        },
+      );
+      if (result is Map) return Map<String, dynamic>.from(result);
+    } catch (e) {
+      if (!_canFallbackTransitionOperation(e)) rethrow;
+      return _transitionOperationWithDirectUpdate(
+        operationId,
+        newStatus,
+        current: current,
+        completedQuantity: completedQuantity,
+        rejectedQuantity: rejectedQuantity,
+        note: note,
+      );
+    }
     return await service.one('production_order_operations', operationId) ??
         <String, dynamic>{'id': operationId, 'status': newStatus};
+  }
+
+  bool _canFallbackTransitionOperation(Object error) {
+    final text = error.toString();
+    return text.contains('transition_production_operation') &&
+        (text.contains('schema cache') ||
+            text.contains('Could not find the function'));
+  }
+
+  Future<Map<String, dynamic>> _transitionOperationWithDirectUpdate(
+    String operationId,
+    String newStatus, {
+    required Map<String, dynamic>? current,
+    double? completedQuantity,
+    double? rejectedQuantity,
+    String? note,
+  }) async {
+    final row =
+        current ??
+        await service.one('production_order_operations', operationId);
+    if (row == null) {
+      throw StateError('Operación de producción no encontrada.');
+    }
+    final now = DateTime.now().toIso8601String();
+    final values = <String, dynamic>{'status': newStatus, 'updated_at': now};
+    if (newStatus == 'in_progress' && row['actual_start_at'] == null) {
+      values['actual_start_at'] = now;
+    }
+    if (newStatus == 'completed') {
+      values['actual_start_at'] = row['actual_start_at'] ?? now;
+      values['actual_end_at'] = now;
+      if (completedQuantity != null) {
+        values['completed_quantity'] = completedQuantity;
+      }
+      if (rejectedQuantity != null) {
+        values['rejected_quantity'] = rejectedQuantity;
+      }
+    }
+    if (newStatus == 'ready') {
+      values['actual_start_at'] = null;
+      values['actual_end_at'] = null;
+    }
+    if (note != null && note.trim().isNotEmpty) {
+      final existing = row['notes']?.toString().trim();
+      values['notes'] = existing == null || existing.isEmpty
+          ? note.trim()
+          : '$existing\n${note.trim()}';
+    }
+    return service.update('production_order_operations', operationId, values);
   }
 
   Future<Map<String, dynamic>> updateOperationResources(

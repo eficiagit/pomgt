@@ -118,45 +118,60 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
           (row) => row?['id']?.toString() == _selectedId,
           orElse: () => rows.isEmpty ? null : rows.first,
         );
-        return Row(
-          children: [
-            SizedBox(
-              width: 310,
-              child: _TypeList(
-                rows: rows,
-                total: data.types.length,
-                selectedId: _selectedId,
-                loading: snapshot.connectionState == ConnectionState.waiting,
-                search: _search,
-                activeFilter: _activeFilter,
-                onSearch: (value) => setState(() => _search = value),
-                onActive: (value) => setState(() => _activeFilter = value),
-                onSelect: (id) => setState(() => _selectedId = id),
-                onRefresh: _reload,
-                onCreate: () => _edit(),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: selected == null
-                  ? const _AdminPanel(
-                      child: Center(
-                        child: Text(
-                          'Selecciona un tipo de material.',
-                          style: TextStyle(color: PomgtColors.muted),
-                        ),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 900;
+            final list = _TypeList(
+              rows: rows,
+              total: data.types.length,
+              selectedId: _selectedId,
+              loading: snapshot.connectionState == ConnectionState.waiting,
+              search: _search,
+              activeFilter: _activeFilter,
+              onSearch: (value) => setState(() => _search = value),
+              onActive: (value) => setState(() => _activeFilter = value),
+              onSelect: (id) => setState(() => _selectedId = id),
+              onRefresh: _reload,
+              onCreate: () => _edit(),
+            );
+            final detail = selected == null
+                ? const _AdminPanel(
+                    child: Center(
+                      child: Text(
+                        'Selecciona un tipo de material.',
+                        style: TextStyle(color: PomgtColors.muted),
                       ),
-                    )
-                  : _TypeDetail(
-                      type: selected,
-                      data: data,
-                      onEdit: () => _edit(selected),
-                      onDeactivate: () => _setActive(selected, false),
-                      onReactivate: () => _setActive(selected, true),
-                      onChanged: _reload,
                     ),
-            ),
-          ],
+                  )
+                : _TypeDetail(
+                    key: ValueKey(selected['id']),
+                    type: selected,
+                    data: data,
+                    onEdit: () => _edit(selected),
+                    onDeactivate: () => _setActive(selected, false),
+                    onReactivate: () => _setActive(selected, true),
+                    onChanged: _reload,
+                  );
+            if (narrow) {
+              return Column(
+                children: [
+                  SizedBox(
+                    height: (constraints.maxHeight * .36).clamp(230.0, 340.0),
+                    child: list,
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(child: detail),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                SizedBox(width: 310, child: list),
+                const SizedBox(width: 14),
+                Expanded(child: detail),
+              ],
+            );
+          },
         );
       },
     );
@@ -316,6 +331,7 @@ class _TypeList extends StatelessWidget {
 
 class _TypeDetail extends StatelessWidget {
   const _TypeDetail({
+    super.key,
     required this.type,
     required this.data,
     required this.onEdit,

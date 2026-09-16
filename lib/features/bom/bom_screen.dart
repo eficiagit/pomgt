@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/entity_crud_panel.dart';
@@ -25,44 +26,62 @@ class _BomTitle extends StatelessWidget {
   const _BomTitle({required this.onCreate});
   final VoidCallback onCreate;
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Estructuras de fabricación',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(width: 8),
-                const InfoTip(
-                  'Define materiales, subensambles, consumibles y empaques para fabricar cada producto.',
-                  size: 18,
-                ),
-              ],
-            ),
-            const SizedBox(height: 3),
-            const Text(
-              'Define materiales, subensambles, consumibles y empaques necesarios para fabricar cada producto.',
-              style: TextStyle(
-                color: PomgtColors.muted,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 760;
+      final titleBlock = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Estructuras de fabricación',
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
+              const InfoTip(
+                'Define materiales, subensambles, consumibles y empaques para fabricar cada producto.',
+                size: 18,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Define materiales, subensambles, consumibles y empaques necesarios para fabricar cada producto.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: PomgtColors.muted,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-        ),
-      ),
-      FilledButton.icon(
+          ),
+        ],
+      );
+      final button = FilledButton.icon(
         onPressed: onCreate,
         icon: const Icon(CupertinoIcons.add, size: 18),
         label: const Text('Nueva estructura de fabricación'),
-      ),
-    ],
+      );
+
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [titleBlock, const SizedBox(height: 10), button],
+        );
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: 18),
+          button,
+        ],
+      );
+    },
   );
 }
 
@@ -198,6 +217,16 @@ class _BomList extends StatelessWidget {
                               ),
                               child: Row(
                                 children: [
+                                  const SizedBox(
+                                    width: 30,
+                                    height: 30,
+                                    child: Icon(
+                                      CupertinoIcons.square_stack_3d_up,
+                                      size: 17,
+                                      color: PomgtColors.ink,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
@@ -377,60 +406,65 @@ class _BomOverview extends StatelessWidget {
                 revisions: revisions.length,
               ),
               const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 7,
-                    child: Column(
-                      children: [
-                        _BomComponents(
-                          rows: items,
-                          revision: revision,
-                          products: products,
-                          units: units,
-                          lookups: lookups,
-                          onAdd: revision == null
-                              ? null
-                              : () => _createItem(context, revision, products),
-                        ),
-                        const SizedBox(height: 12),
-                        _BomImpact(items: items),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 4,
-                    child: Column(
-                      children: [
-                        _BomSubstitutes(
-                          rows: substitutes,
-                          products: products,
-                          lookups: lookups,
-                          onShowAll: substitutes.isEmpty
-                              ? null
-                              : () => _showSubstitutes(context, products),
-                        ),
-                        const SizedBox(height: 12),
-                        _BomRevisions(
-                          rows: revisions,
-                          onShowHistory: revisions.isEmpty
-                              ? null
-                              : () => _showRevisions(context),
-                        ),
-                        const SizedBox(height: 12),
-                        _BomDocuments(
-                          rows: documents,
-                          revision: revision,
-                          onShowAll: documents.isEmpty || revision == null
-                              ? null
-                              : () => _showDocuments(context, revision),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final left = Column(
+                    children: [
+                      _BomComponents(
+                        rows: items,
+                        revision: revision,
+                        products: products,
+                        units: units,
+                        lookups: lookups,
+                        onAdd: revision == null
+                            ? null
+                            : () => _createItem(context, revision, products),
+                      ),
+                      const SizedBox(height: 12),
+                      _BomImpact(items: items),
+                    ],
+                  );
+                  final right = Column(
+                    children: [
+                      _BomSubstitutes(
+                        rows: substitutes,
+                        products: products,
+                        lookups: lookups,
+                        onShowAll: substitutes.isEmpty
+                            ? null
+                            : () => _showSubstitutes(context, products),
+                      ),
+                      const SizedBox(height: 12),
+                      _BomRevisions(
+                        rows: revisions,
+                        onShowHistory: revisions.isEmpty
+                            ? null
+                            : () => _showRevisions(context),
+                      ),
+                      const SizedBox(height: 12),
+                      _BomDocuments(
+                        rows: documents,
+                        revision: revision,
+                        onShowAll: documents.isEmpty || revision == null
+                            ? null
+                            : () => _showDocuments(context, revision),
+                      ),
+                    ],
+                  );
+                  if (constraints.maxWidth < 860) {
+                    return Column(
+                      children: [left, const SizedBox(height: 12), right],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 7, child: left),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 4, child: right),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 12),
               _BomActions(id: id, bom: bom),
@@ -602,9 +636,7 @@ class _BomOverview extends StatelessWidget {
       }
     }
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Estructura de fabricación duplicada.')),
-    );
+    showPomgtSnackBar(context, 'Estructura de fabricación duplicada.');
     onChanged();
   }
 
@@ -679,58 +711,95 @@ class _BomHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _BomPanel(
     padding: const EdgeInsets.fromLTRB(18, 16, 12, 14),
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      '${bom['bom_code'] ?? 'LM'} · ${bom['name'] ?? 'Estructura de fabricación'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: PomgtColors.ink,
-                      ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 820;
+        final titleBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 9,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: compact
+                        ? (constraints.maxWidth - 36).clamp(
+                            0.0,
+                            double.infinity,
+                          )
+                        : constraints.maxWidth * .68,
+                  ),
+                  child: Text(
+                    '${bom['bom_code'] ?? 'LM'} · ${bom['name'] ?? 'Estructura de fabricación'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: PomgtColors.ink,
                     ),
                   ),
-                  const SizedBox(width: 9),
-                  _BomStatus(active: bom['is_active'] == true),
-                ],
-              ),
-              const SizedBox(height: 5),
-              Text(
-                'Producto asociado · Estructura ${bom['is_default'] == true ? 'predeterminada' : 'configurable'}',
-                style: const TextStyle(
-                  color: PomgtColors.muted,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
                 ),
+                _BomStatus(active: bom['is_active'] == true),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'Producto asociado · Estructura ${bom['is_default'] == true ? 'predeterminada' : 'configurable'}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: PomgtColors.muted,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
-        ),
-        TextButton.icon(
-          onPressed: onEdit,
-          icon: const Icon(CupertinoIcons.pencil, size: 16),
-          label: const Text('Editar'),
-        ),
-        TextButton.icon(
-          onPressed: onDuplicate,
-          icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
-          label: const Text('Duplicar'),
-        ),
-        TextButton.icon(
-          onPressed: onCreateRevision,
-          icon: const Icon(CupertinoIcons.add_circled, size: 16),
-          label: const Text('Nueva revisión'),
-        ),
-      ],
+            ),
+          ],
+        );
+        final actionBlock = Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+          children: [
+            TextButton.icon(
+              onPressed: onEdit,
+              icon: const Icon(CupertinoIcons.pencil, size: 16),
+              label: const Text('Editar'),
+            ),
+            TextButton.icon(
+              onPressed: onDuplicate,
+              icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
+              label: const Text('Duplicar'),
+            ),
+            TextButton.icon(
+              onPressed: onCreateRevision,
+              icon: const Icon(CupertinoIcons.add_circled, size: 16),
+              label: const Text('Nueva revisión'),
+            ),
+          ],
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [titleBlock, const SizedBox(height: 10), actionBlock],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: titleBlock),
+            const SizedBox(width: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth * .46),
+              child: actionBlock,
+            ),
+          ],
+        );
+      },
     ),
   );
 }
@@ -972,34 +1041,40 @@ class _BomComponents extends StatelessWidget {
               ),
             ),
           )
-        : Table(
-            columnWidths: const {
-              0: FlexColumnWidth(1.7),
-              1: FlexColumnWidth(1),
-              2: FlexColumnWidth(.7),
-              3: FlexColumnWidth(.7),
-              4: FlexColumnWidth(.7),
-              5: FlexColumnWidth(1),
-            },
-            children: [
-              _bomHeader([
-                'Material',
-                'Tipo',
-                'Cantidad',
-                'Unidad',
-                'Merma',
-                'Disponibilidad',
-              ]),
-              for (final row in rows.take(8))
-                _bomRow([
-                  _productName(row['component_product_id']),
-                  UiCopy.enumLabel(row['component_type']?.toString() ?? ''),
-                  row['quantity']?.toString() ?? '—',
-                  _unitName(row['uom_id']),
-                  '${row['scrap_pct'] ?? 0}%',
-                  row['is_optional'] == true ? 'Opcional' : 'Disponible',
-                ]),
-            ],
+        : SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: 760,
+              child: Table(
+                columnWidths: const {
+                  0: FlexColumnWidth(1.7),
+                  1: FlexColumnWidth(1),
+                  2: FlexColumnWidth(.7),
+                  3: FlexColumnWidth(.7),
+                  4: FlexColumnWidth(.7),
+                  5: FlexColumnWidth(1),
+                },
+                children: [
+                  _bomHeader([
+                    'Material',
+                    'Tipo',
+                    'Cantidad',
+                    'Unidad',
+                    'Merma',
+                    'Disponibilidad',
+                  ]),
+                  for (final row in rows.take(8))
+                    _bomRow([
+                      _productName(row['component_product_id']),
+                      UiCopy.enumLabel(row['component_type']?.toString() ?? ''),
+                      row['quantity']?.toString() ?? '—',
+                      _unitName(row['uom_id']),
+                      '${row['scrap_pct'] ?? 0}%',
+                      row['is_optional'] == true ? 'Opcional' : 'Disponible',
+                    ]),
+                ],
+              ),
+            ),
           ),
   );
 }
@@ -1118,17 +1193,48 @@ class _BomImpact extends StatelessWidget {
   Widget build(BuildContext context) => _BomSection(
     title: 'Impacto en producción',
     icon: CupertinoIcons.chart_bar,
-    child: Row(
-      children: [
-        _BomImpactValue(
-          CupertinoIcons.cube_box,
-          '${items.length}',
-          'Componentes ligados',
-        ),
-        _BomImpactValue(CupertinoIcons.cart, '—', 'Órdenes relacionadas'),
-        _BomImpactValue(CupertinoIcons.calendar, '—', 'Última actualización'),
-        _BomImpactValue(CupertinoIcons.person, '—', 'Responsable'),
-      ],
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = constraints.maxWidth >= 620
+            ? (constraints.maxWidth - 24) / 4
+            : constraints.maxWidth >= 360
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 10,
+          children: [
+            SizedBox(
+              width: itemWidth,
+              child: _BomImpactValue(
+                CupertinoIcons.cube_box,
+                '${items.length}',
+                'Componentes ligados',
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _BomImpactValue(
+                CupertinoIcons.cart,
+                '—',
+                'Órdenes relacionadas',
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _BomImpactValue(
+                CupertinoIcons.calendar,
+                '—',
+                'Última actualización',
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _BomImpactValue(CupertinoIcons.person, '—', 'Responsable'),
+            ),
+          ],
+        );
+      },
     ),
   );
 }
@@ -1139,36 +1245,28 @@ class _BomImpactValue extends StatelessWidget {
   final String value;
   final String label;
   @override
-  Widget build(BuildContext context) => Expanded(
-    child: Row(
-      children: [
-        Icon(icon, color: PomgtColors.blue, size: 20),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: PomgtColors.muted,
-                  fontSize: 10.5,
-                ),
-              ),
-            ],
-          ),
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, color: PomgtColors.blue, size: 20),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+            ),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: PomgtColors.muted, fontSize: 10.5),
+            ),
+          ],
         ),
-      ],
-    ),
+      ),
+    ],
   );
 }
 
@@ -1368,42 +1466,54 @@ class _BomCrudDialog extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Dialog(
-    insetPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 26),
-    child: ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: 980,
-        maxHeight: MediaQuery.sizeOf(context).height * .88,
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final compact = size.width < 640;
+    return Dialog(
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 26,
+        vertical: compact ? 10 : 26,
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: compact ? size.width - 20 : 980,
+          maxHeight: size.height * .9,
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 14 : 22,
+            compact ? 14 : 18,
+            compact ? 14 : 22,
+            compact ? 14 : 22,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Cerrar',
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(CupertinoIcons.xmark, size: 20),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            Expanded(child: child),
-          ],
+                  IconButton(
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(CupertinoIcons.xmark, size: 20),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              Expanded(child: child),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _BomLine extends StatelessWidget {
@@ -1578,9 +1688,7 @@ class _BomScreenState extends State<BomScreen> {
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showPomgtSnackBar(context, error.toString(), isError: true);
     }
   }
 
@@ -1617,53 +1725,73 @@ class _BomScreenState extends State<BomScreen> {
               style: TextStyle(color: PomgtColors.danger),
             ),
           );
+        final width = MediaQuery.sizeOf(context).width;
+        final compact = width < 980;
+        final sideWidth = width >= 1280 ? 270.0 : 300.0;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 12 : 16,
+            compact ? 14 : 18,
+            compact ? 12 : 16,
+            compact ? 18 : 24,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _BomTitle(onCreate: _create),
               const SizedBox(height: 16),
               Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: MediaQuery.sizeOf(context).width >= 1280
-                          ? 270
-                          : 300,
-                      child: _BomList(
-                        rows: rows,
-                        total: allRows.length,
-                        selectedId: selectedId,
-                        search: search,
-                        loading:
-                            snapshot.connectionState == ConnectionState.waiting,
-                        onSearch: (value) => setState(() => search = value),
-                        onSelect: (id) => setState(() => selectedId = id),
-                        onEdit: _edit,
-                        onDelete: _delete,
-                        onRefresh: _reload,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: selected == null
-                          ? const _BomPanel(
-                              child: Center(
-                                child: Text(
-                                  'Selecciona una estructura para ver su expediente.',
-                                  style: TextStyle(color: PomgtColors.muted),
-                                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final list = _BomList(
+                      rows: rows,
+                      total: allRows.length,
+                      selectedId: selectedId,
+                      search: search,
+                      loading:
+                          snapshot.connectionState == ConnectionState.waiting,
+                      onSearch: (value) => setState(() => search = value),
+                      onSelect: (id) => setState(() => selectedId = id),
+                      onEdit: _edit,
+                      onDelete: _delete,
+                      onRefresh: _reload,
+                    );
+                    final detail = selected == null
+                        ? const _BomPanel(
+                            child: Center(
+                              child: Text(
+                                'Selecciona una estructura para ver su expediente.',
+                                style: TextStyle(color: PomgtColors.muted),
                               ),
-                            )
-                          : _BomOverview(
-                              key: ValueKey(selected['id']),
-                              bom: selected,
-                              onEdit: () => _edit(selected),
-                              onChanged: _reload,
                             ),
-                    ),
-                  ],
+                          )
+                        : _BomOverview(
+                            key: ValueKey(selected['id']),
+                            bom: selected,
+                            onEdit: () => _edit(selected),
+                            onChanged: _reload,
+                          );
+                    if (constraints.maxWidth < 980) {
+                      final listHeight = (constraints.maxHeight * .36).clamp(
+                        240.0,
+                        360.0,
+                      );
+                      return Column(
+                        children: [
+                          SizedBox(height: listHeight, child: list),
+                          const SizedBox(height: 12),
+                          Expanded(child: detail),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        SizedBox(width: sideWidth, child: list),
+                        const SizedBox(width: 14),
+                        Expanded(child: detail),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -1798,20 +1926,32 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ErrorCopy.message(e))));
+      showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
       setState(() => saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final compact = size.width < 640;
     return Dialog(
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 24,
+        vertical: compact ? 10 : 24,
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 820, maxHeight: 760),
+        constraints: BoxConstraints(
+          maxWidth: compact ? size.width - 20 : 820,
+          maxHeight: size.height * .9,
+        ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(30, 26, 30, 24),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 16 : 30,
+            compact ? 16 : 26,
+            compact ? 16 : 30,
+            compact ? 16 : 24,
+          ),
           child: FutureBuilder<List<List<Map<String, dynamic>>>>(
             future: future,
             builder: (context, snapshot) {
@@ -1832,8 +1972,10 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           const Icon(
                             CupertinoIcons.square_stack_3d_up,
@@ -1841,7 +1983,11 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
                             color: PomgtColors.blue,
                           ),
                           const SizedBox(width: 12),
-                          Expanded(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 220,
+                              maxWidth: 620,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -2073,8 +2219,10 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
                         onChanged: (v) => setState(() => isDefault = v),
                       ),
                       const SizedBox(height: 22),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 10,
+                        runSpacing: 10,
                         children: [
                           TextButton(
                             onPressed: saving
@@ -2082,7 +2230,6 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
                                 : () => Navigator.pop(context),
                             child: const Text('Cancelar'),
                           ),
-                          const SizedBox(width: 10),
                           FilledButton.icon(
                             onPressed: saving ? null : _save,
                             icon: saving

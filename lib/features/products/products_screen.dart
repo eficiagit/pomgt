@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/detail_sections.dart';
 import '../../core/widgets/entity_crud_panel.dart';
@@ -93,9 +94,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showPomgtSnackBar(context, error.toString(), isError: true);
     }
   }
 
@@ -175,46 +174,66 @@ class _ProductsScreenState extends State<ProductsScreen> {
             ),
           );
         }
+        final width = MediaQuery.sizeOf(context).width;
+        final compact = width < 980;
+        final sideWidth = width >= 1280 ? 270.0 : 300.0;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 12 : 16,
+            compact ? 14 : 18,
+            compact ? 12 : 16,
+            compact ? 18 : 24,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _ProductsTitle(onCreate: () => _edit()),
               const SizedBox(height: 16),
               Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: MediaQuery.sizeOf(context).width >= 1280
-                          ? 270
-                          : 300,
-                      child: _ProductListPanel(
-                        rows: filtered,
-                        total: rows.length,
-                        selectedId: selectedId,
-                        search: search,
-                        loading:
-                            snapshot.connectionState == ConnectionState.waiting,
-                        onSearch: (value) => setState(() => search = value),
-                        onSelect: (id) => setState(() => selectedId = id),
-                        onEdit: _edit,
-                        onDelete: _delete,
-                        onRefresh: _reload,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: selected == null
-                          ? const _ProductEmptyDetail()
-                          : _ProductOverview(
-                              key: ValueKey(selected['id']),
-                              product: selected,
-                              onEdit: () => _edit(selected),
-                              onDelete: () => _delete(selected),
-                            ),
-                    ),
-                  ],
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final list = _ProductListPanel(
+                      rows: filtered,
+                      total: rows.length,
+                      selectedId: selectedId,
+                      search: search,
+                      loading:
+                          snapshot.connectionState == ConnectionState.waiting,
+                      onSearch: (value) => setState(() => search = value),
+                      onSelect: (id) => setState(() => selectedId = id),
+                      onEdit: _edit,
+                      onDelete: _delete,
+                      onRefresh: _reload,
+                    );
+                    final detail = selected == null
+                        ? const _ProductEmptyDetail()
+                        : _ProductOverview(
+                            key: ValueKey(selected['id']),
+                            product: selected,
+                            onEdit: () => _edit(selected),
+                            onDelete: () => _delete(selected),
+                          );
+                    if (constraints.maxWidth < 980) {
+                      final listHeight = (constraints.maxHeight * .36).clamp(
+                        240.0,
+                        360.0,
+                      );
+                      return Column(
+                        children: [
+                          SizedBox(height: listHeight, child: list),
+                          const SizedBox(height: 12),
+                          Expanded(child: detail),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        SizedBox(width: sideWidth, child: list),
+                        const SizedBox(width: 14),
+                        Expanded(child: detail),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -242,44 +261,62 @@ class _ProductsTitle extends StatelessWidget {
   final VoidCallback onCreate;
 
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Productos',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(width: 8),
-                const InfoTip(
-                  'Gestiona productos, revisiones, clientes, estructuras de fabricación, rutas y documentos.',
-                  size: 18,
-                ),
-              ],
-            ),
-            const SizedBox(height: 3),
-            const Text(
-              'Catálogo maestro de productos, revisiones, especificaciones, estructuras de fabricación y rutas de fabricación.',
-              style: TextStyle(
-                color: PomgtColors.muted,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 720;
+      final titleBlock = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Productos',
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
+              const InfoTip(
+                'Gestiona productos, revisiones, clientes, estructuras de fabricación, rutas y documentos.',
+                size: 18,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Catálogo maestro de productos, revisiones, especificaciones, estructuras de fabricación y rutas de fabricación.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: PomgtColors.muted,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-        ),
-      ),
-      FilledButton.icon(
+          ),
+        ],
+      );
+      final button = FilledButton.icon(
         onPressed: onCreate,
         icon: const Icon(CupertinoIcons.add, size: 18),
         label: const Text('Nuevo producto'),
-      ),
-    ],
+      );
+
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [titleBlock, const SizedBox(height: 10), button],
+        );
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: 18),
+          button,
+        ],
+      );
+    },
   );
 }
 
@@ -599,51 +636,54 @@ class _ProductOverview extends StatelessWidget {
                 completedUnits: _sum(productionOrders, 'completed_quantity'),
               ),
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: Column(
-                      children: [
-                        _ProductInfoPanel(product: product, lookups: lookups),
-                        const SizedBox(height: 14),
-                        _ProductRowsPanel(
-                          title: 'Estructura de fabricación vinculada',
-                          link: boms.isEmpty ? null : 'Ver estructura completa',
-                          rows: boms,
-                          empty: 'Sin estructuras de fabricación.',
-                          icon: CupertinoIcons.square_stack_3d_up,
-                          titleField: 'name',
-                          fallbackTitleField: 'bom_code',
-                          subtitleFields: const ['bom_code', 'description'],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      children: [
-                        _ProductTechnicalPanel(rows: revisions),
-                        const SizedBox(height: 14),
-                        _ProductRevisionPanel(rows: revisions),
-                      ],
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stacked = constraints.maxWidth < 760;
+                  final left = Column(
+                    children: [
+                      _ProductInfoPanel(product: product, lookups: lookups),
+                      const SizedBox(height: 14),
+                      _ProductRowsPanel(
+                        title: 'Estructura de fabricación vinculada',
+                        link: boms.isEmpty ? null : 'Ver estructura completa',
+                        rows: boms,
+                        empty: 'Sin estructuras de fabricación.',
+                        icon: CupertinoIcons.square_stack_3d_up,
+                        titleField: 'name',
+                        fallbackTitleField: 'bom_code',
+                        subtitleFields: const ['bom_code', 'description'],
+                      ),
+                    ],
+                  );
+                  final right = Column(
+                    children: [
+                      _ProductTechnicalPanel(rows: revisions),
+                      const SizedBox(height: 14),
+                      _ProductRevisionPanel(rows: revisions),
+                    ],
+                  );
+                  if (stacked) {
+                    return Column(
+                      children: [left, const SizedBox(height: 14), right],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 4, child: left),
+                      const SizedBox(width: 14),
+                      Expanded(flex: 3, child: right),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: _ProductRoutingPanel(rows: routings)),
-                  const SizedBox(width: 14),
-                  Expanded(child: _ProductUsagePanel(rows: productionOrders)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _ProductRowsPanel(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cards = [
+                    _ProductRoutingPanel(rows: routings),
+                    _ProductUsagePanel(rows: productionOrders),
+                    _ProductRowsPanel(
                       title: 'Clientes que lo compran',
                       link: customerProducts.isEmpty
                           ? null
@@ -655,34 +695,60 @@ class _ProductOverview extends StatelessWidget {
                       fallbackTitleField: 'customer_sku',
                       subtitleFields: const ['customer_sku', 'revision'],
                     ),
-                  ),
-                ],
+                  ];
+                  if (constraints.maxWidth < 860) {
+                    return Column(
+                      children: [
+                        for (var i = 0; i < cards.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 14),
+                          cards[i],
+                        ],
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < cards.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 14),
+                        Expanded(child: cards[i]),
+                      ],
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _ProductRowsPanel(
-                      title: 'Documentos recientes',
-                      link: documents.isEmpty ? null : 'Ver todos',
-                      rows: documents,
-                      empty: 'Sin documentos.',
-                      icon: CupertinoIcons.doc_text,
-                      titleField: 'document_title',
-                      fallbackTitleField: 'document_id',
-                      subtitleFields: const ['document_type', 'created_at'],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _ProductActivityPanel(
-                      productionOrders: productionOrders,
-                      revisions: revisions,
-                      nonconformities: nonconformities,
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final left = _ProductRowsPanel(
+                    title: 'Documentos recientes',
+                    link: documents.isEmpty ? null : 'Ver todos',
+                    rows: documents,
+                    empty: 'Sin documentos.',
+                    icon: CupertinoIcons.doc_text,
+                    titleField: 'document_title',
+                    fallbackTitleField: 'document_id',
+                    subtitleFields: const ['document_type', 'created_at'],
+                  );
+                  final right = _ProductActivityPanel(
+                    productionOrders: productionOrders,
+                    revisions: revisions,
+                    nonconformities: nonconformities,
+                  );
+                  if (constraints.maxWidth < 760) {
+                    return Column(
+                      children: [left, const SizedBox(height: 14), right],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: left),
+                      const SizedBox(width: 14),
+                      Expanded(child: right),
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -755,57 +821,92 @@ class _ProductHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _ProductPanel(
     padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      product['name']?.toString() ?? 'Producto',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: PomgtColors.ink,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 820;
+        final titleBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: compact
+                        ? (constraints.maxWidth - 36).clamp(
+                            0.0,
+                            double.infinity,
+                          )
+                        : constraints.maxWidth * .68,
+                  ),
+                  child: Text(
+                    product['name']?.toString() ?? 'Producto',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: PomgtColors.ink,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const InfoTip('Ficha maestra del producto.', size: 16),
-                  const SizedBox(width: 10),
-                  _PlainStatus(active: product['is_active'] == true),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${product['sku'] ?? '—'} · ${UiCopy.enumLabel(product['product_type']?.toString() ?? '')}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: PomgtColors.muted,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
                 ),
+                const InfoTip('Ficha maestra del producto.', size: 16),
+                _PlainStatus(active: product['is_active'] == true),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${product['sku'] ?? '—'} · ${UiCopy.enumLabel(product['product_type']?.toString() ?? '')}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: PomgtColors.muted,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
-        ),
-        TextButton.icon(
-          onPressed: onEdit,
-          icon: const Icon(CupertinoIcons.pencil, size: 17),
-          label: const Text('Editar producto'),
-        ),
-        IconButton(
-          onPressed: onDelete,
-          tooltip: 'Eliminar producto',
-          icon: const Icon(CupertinoIcons.trash, size: 18),
-        ),
-      ],
+            ),
+          ],
+        );
+        final actionBlock = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            TextButton.icon(
+              onPressed: onEdit,
+              icon: const Icon(CupertinoIcons.pencil, size: 17),
+              label: const Text('Editar producto'),
+            ),
+            IconButton(
+              onPressed: onDelete,
+              tooltip: 'Eliminar producto',
+              icon: const Icon(CupertinoIcons.trash, size: 18),
+            ),
+          ],
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [titleBlock, const SizedBox(height: 10), actionBlock],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: titleBlock),
+            const SizedBox(width: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth * .36),
+              child: actionBlock,
+            ),
+          ],
+        );
+      },
     ),
   );
 }
@@ -1070,32 +1171,28 @@ class _ProductInfoPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child:
-                      product['description'] != null &&
-                          product['description'].toString().trim().isNotEmpty
-                      ? Text(
-                          product['description'].toString(),
-                          style: const TextStyle(
-                            color: PomgtColors.secondaryInk,
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
-                        )
-                      : const Text(
-                          'Ficha maestra del producto y sus vínculos operativos.',
-                          style: TextStyle(
-                            color: PomgtColors.muted,
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final copy =
+                    product['description'] != null &&
+                        product['description'].toString().trim().isNotEmpty
+                    ? Text(
+                        product['description'].toString(),
+                        style: const TextStyle(
+                          color: PomgtColors.secondaryInk,
+                          fontSize: 13,
+                          height: 1.4,
                         ),
-                ),
-                const SizedBox(width: 16),
-                Container(
+                      )
+                    : const Text(
+                        'Ficha maestra del producto y sus vínculos operativos.',
+                        style: TextStyle(
+                          color: PomgtColors.muted,
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      );
+                final icon = Container(
                   width: 122,
                   height: 92,
                   decoration: BoxDecoration(
@@ -1107,8 +1204,22 @@ class _ProductInfoPanel extends StatelessWidget {
                     size: 42,
                     color: PomgtColors.blue,
                   ),
-                ),
-              ],
+                );
+                if (constraints.maxWidth < 520) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [icon, const SizedBox(height: 12), copy],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: copy),
+                    const SizedBox(width: 16),
+                    icon,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 18),
             LayoutBuilder(

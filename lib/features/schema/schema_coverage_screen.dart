@@ -15,6 +15,7 @@ class _SchemaCoverageScreenState extends State<SchemaCoverageScreen> {
   String search = '';
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
     final entries = Phase1Schema.tables.entries.where((e) {
       final q = search.trim().toLowerCase();
       if (q.isEmpty) return true;
@@ -27,21 +28,32 @@ class _SchemaCoverageScreenState extends State<SchemaCoverageScreen> {
           );
     }).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 12 : 28,
+        compact ? 14 : 24,
+        compact ? 12 : 28,
+        compact ? 18 : 28,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
-                'Cobertura del esquema',
-                style: Theme.of(context).textTheme.headlineMedium,
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: Text(
+                  'Cobertura del esquema',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
               ),
-              const SizedBox(width: 8),
               const InfoTip(
                 'Auditoría visual de la primera fase. Todas las tablas y atributos de la base de datos están declarados en la interfaz. Los campos técnicos como identificadores, fechas de creación y actualización, y usuario creador se usan internamente aunque no se capturen manualmente.',
               ),
-              const Spacer(),
               Text(
                 '${Phase1Schema.tables.length} tablas',
                 style: const TextStyle(color: PomgtColors.muted),
@@ -127,69 +139,75 @@ class _SchemaCoverageScreenState extends State<SchemaCoverageScreen> {
                       child: Column(
                         children: e.value.fields
                             .map(
-                              (f) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 9,
-                                ),
-                                decoration: const BoxDecoration(
-                                  border: Border(
-                                    bottom: BorderSide(color: PomgtColors.line),
+                              (f) => SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Container(
+                                  width: 680,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 9,
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 220,
-                                      child: Text(
-                                        UiCopy.fieldLabel(f.name, f.label),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 12.5,
-                                        ),
+                                  decoration: const BoxDecoration(
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: PomgtColors.line,
                                       ),
                                     ),
-                                    SizedBox(
-                                      width: 220,
-                                      child: Text(
-                                        f.name,
-                                        style: const TextStyle(
-                                          fontFamily: 'monospace',
-                                          fontSize: 11.5,
-                                          color: PomgtColors.muted,
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(
-                                      width: 120,
-                                      child: Text(
-                                        _kindLabel(f.kind),
-                                        style: const TextStyle(
-                                          fontSize: 11.5,
-                                          color: PomgtColors.muted,
-                                        ),
-                                      ),
-                                    ),
-                                    if (f.required)
-                                      const Text(
-                                        'Requerido',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: PomgtColors.blue,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    if (f.readOnly)
-                                      const Padding(
-                                        padding: EdgeInsets.only(left: 10),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 220,
                                         child: Text(
-                                          'Sistema',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: PomgtColors.subtle,
+                                          UiCopy.fieldLabel(f.name, f.label),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12.5,
                                           ),
                                         ),
                                       ),
-                                  ],
+                                      SizedBox(
+                                        width: 220,
+                                        child: Text(
+                                          f.name,
+                                          style: const TextStyle(
+                                            fontFamily: 'monospace',
+                                            fontSize: 11.5,
+                                            color: PomgtColors.muted,
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 120,
+                                        child: Text(
+                                          _kindLabel(f.kind),
+                                          style: const TextStyle(
+                                            fontSize: 11.5,
+                                            color: PomgtColors.muted,
+                                          ),
+                                        ),
+                                      ),
+                                      if (f.required)
+                                        const Text(
+                                          'Requerido',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: PomgtColors.blue,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      if (f.readOnly)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 10),
+                                          child: Text(
+                                            'Sistema',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: PomgtColors.subtle,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             )
