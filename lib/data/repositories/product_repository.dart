@@ -1,7 +1,7 @@
 import 'base_repository.dart';
 
 class ProductRepository extends BaseRepository {
-  ProductRepository(super.service, super.client);
+  ProductRepository(super.service, super.client, {super.runtimeData});
 
   Future<List<Map<String, dynamic>>> products() =>
       listTenant('products', orderBy: 'name');
@@ -29,5 +29,10 @@ class ProductRepository extends BaseRepository {
       'routings': results[3],
       'documents': results[4],
     };
+  }
+
+  Future<void> deleteProduct(String productId) async {
+    await service.rpc('delete_product', params: {'p_product_id': productId});
+    runtimeData?.tableChanged('products');
   }
 }

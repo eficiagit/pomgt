@@ -1,19 +1,31 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/app_notice.dart';
+import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/detail_sections.dart';
+import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/entity_crud_panel.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../core/widgets/linked_documents_panel.dart';
 import '../../core/widgets/record_workspace.dart';
+import '../bom/link_bom_dialog.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
+import '../../data/repositories/product_repository.dart';
+import '../../core/widgets/section_title.dart';
 
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
@@ -62,12 +74,20 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> product) async {
-    final confirmed = await showDialog<bool>(
+    final name = product['name']?.toString().trim().isNotEmpty == true
+        ? product['name'].toString()
+        : (product['sku']?.toString() ?? 'este producto');
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Eliminar producto'),
-        content: const Text(
-          'Esta acción no se puede deshacer. Los registros relacionados pueden impedir la eliminación para proteger la trazabilidad.',
+        title: pomgtDialogTitle(
+          context,
+          'Eliminar producto',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text('Esta acción no se puede deshacer.'),
         ),
         actions: [
           TextButton(
@@ -76,31 +96,72 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar'),
+            child: const Text('Continuar'),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
+
+    final confirmedDetails = await showPomgtDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: pomgtDialogTitle(
+          context,
+          '¿Eliminar $name?',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: const Text(
+            'Se eliminarán también su estructura de fabricación, rutas, versiones, documentos ligados y sus vínculos con clientes.\n\n'
+            'Si este producto se usa como componente en la estructura de fabricación de otro producto, no podrá eliminarse. Si solo está referenciado en un paso de una ruta de fabricación, se desvinculará de ese paso.\n\n'
+            'Si tiene órdenes de producción, líneas de pedido, entregas, reclamos o no conformidades registradas, no podrá eliminarse.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: PomgtColors.danger),
+            child: const Text('Eliminar definitivamente'),
+          ),
+        ],
+      ),
+    );
+    if (confirmedDetails != true || !mounted) return;
+
     try {
-      await context.read<GenericRepository>().deleteRow(
-        Phase1Schema.tables['products']!,
-        product,
+      await context.read<ProductRepository>().deleteProduct(
+        product['id'].toString(),
       );
       if (!mounted) return;
       setState(() => selectedId = null);
       context.read<LookupRepository>().invalidate('products');
       context.read<ProductsController>().refresh();
       _reload();
+      showPomgtSnackBar(context, 'Producto eliminado.');
     } catch (error) {
       if (!mounted) return;
-      showPomgtSnackBar(context, error.toString(), isError: true);
+      showPomgtSnackBar(
+        context,
+        ErrorCopy.message(
+          error,
+          fallback: 'No fue posible eliminar el producto.',
+        ),
+        isError: true,
+      );
     }
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
     final repository = context.read<GenericRepository>();
-    final changed = await showDialog<bool>(
+    final creating = row == null;
+    Map<String, dynamic>? createdProduct;
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -116,11 +177,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
         fixedValues: row == null
             ? const {'product_type': 'finished_good'}
             : const {},
-        referenceFilters: const {
-          'product_type_catalog_id': {'system_class': 'finished_good'},
-        },
         title: row == null ? 'Nuevo producto' : 'Editar producto',
-        icon: Icons.inventory_2_outlined,
+        icon: LucideIcons.package,
+        onSaved: creating ? (saved) => createdProduct = saved : null,
         afterSaved: (saved) async {
           if (saved['id'] == null || saved['product_type'] == 'finished_good') {
             return;
@@ -137,6 +196,26 @@ class _ProductsScreenState extends State<ProductsScreen> {
       context.read<LookupRepository>().invalidate('products');
       context.read<ProductsController>().refresh();
       _reload();
+      if (creating && createdProduct != null) {
+        setState(() => selectedId = createdProduct!['id']?.toString());
+        if (mounted) await _offerLinkBom(createdProduct!);
+      }
+    }
+  }
+
+  /// Right after a product is created, offers to build its estructura de
+  /// fabricación (BOM) in the same flow by linking already-existing
+  /// materials/components — instead of forcing a separate trip through the
+  /// Estructuras de fabricación module.
+  Future<void> _offerLinkBom(Map<String, dynamic> product) async {
+    final created = await showPomgtDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => LinkBomDialog(product: product),
+    );
+    if (created == true && mounted) {
+      context.read<LookupRepository>().invalidate('boms');
+      context.read<BomController>().refresh();
     }
   }
 
@@ -147,7 +226,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
         final rows = allRows
-            .where((row) => !_isMaterialCatalogRow(row))
+            .where((row) => !isMaterialCatalogRow(row))
             .toList();
 
         final query = search.trim().toLowerCase();
@@ -244,18 +323,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 }
 
-bool _isMaterialCatalogRow(Map<String, dynamic> row) {
-  const materialTypes = {
-    'raw_material',
-    'consumable',
-    'packaging',
-    'tooling',
-    'service',
-  };
-  return row['material_type_id'] != null ||
-      materialTypes.contains(row['product_type']?.toString());
-}
-
 class _ProductsTitle extends StatelessWidget {
   const _ProductsTitle({required this.onCreate});
   final VoidCallback onCreate;
@@ -272,19 +339,16 @@ class _ProductsTitle extends StatelessWidget {
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
-                'Productos',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
+              const SectionTitle('Productos', icon: LucideIcons.box),
               const InfoTip(
-                'Gestiona productos, revisiones, clientes, estructuras de fabricación, rutas y documentos.',
+                'Gestiona productos, versiones, clientes, estructuras de fabricación, rutas y documentos.',
                 size: 18,
               ),
             ],
           ),
           const SizedBox(height: 3),
           const Text(
-            'Catálogo maestro de productos, revisiones, especificaciones, estructuras de fabricación y rutas de fabricación.',
+            'Catálogo maestro de productos, versiones, especificaciones, estructuras de fabricación y rutas de fabricación.',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -297,7 +361,7 @@ class _ProductsTitle extends StatelessWidget {
       );
       final button = FilledButton.icon(
         onPressed: onCreate,
-        icon: const Icon(CupertinoIcons.add, size: 18),
+        icon: const Icon(LucideIcons.plus, size: 18),
         label: const Text('Nuevo producto'),
       );
 
@@ -369,7 +433,7 @@ class _ProductListPanel extends StatelessWidget {
                         onChanged: onSearch,
                         decoration: const InputDecoration(
                           hintText: 'Buscar productos...',
-                          prefixIcon: Icon(CupertinoIcons.search, size: 20),
+                          prefixIcon: Icon(LucideIcons.search, size: 20),
                           prefixIconConstraints: BoxConstraints(minWidth: 46),
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 18,
@@ -383,7 +447,7 @@ class _ProductListPanel extends StatelessWidget {
                   IconButton(
                     tooltip: 'Actualizar',
                     onPressed: onRefresh,
-                    icon: const Icon(CupertinoIcons.refresh, size: 18),
+                    icon: const Icon(LucideIcons.refreshCw, size: 18),
                   ),
                 ],
               ),
@@ -405,14 +469,14 @@ class _ProductListPanel extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
         const SizedBox(height: 8),
         Expanded(
           child: loading
-              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              ? const PomgtLoading()
               : rows.isEmpty
               ? const Center(
                   child: Text(
@@ -420,40 +484,39 @@ class _ProductListPanel extends StatelessWidget {
                     style: TextStyle(color: PomgtColors.muted),
                   ),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    final id = row['id']?.toString();
-                    final selected = id == selectedId;
-                    return InkWell(
-                      borderRadius: PomgtRadii.borderSm,
-                      onTap: () => onSelect(id),
-                      child: Container(
+              : ScrollToTopArea(
+                  padding: const EdgeInsets.all(10),
+                  builder: (context, controller) => PomgtListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    itemCount: rows.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final row = rows[index];
+                      final id = row['id']?.toString();
+                      final selected = id == selectedId;
+                      return SmoothHover(
+                        selected: selected,
+                        selectedColor: PomgtColors.navySelected,
+                        hoverColor: PomgtColors.surfaceAlt.withValues(
+                          alpha: .55,
+                        ),
+                        borderColor: selected
+                            ? PomgtColors.navySelectedBorder
+                            : PomgtColors.line,
+                        lift: .2,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 14,
                         ),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? PomgtColors.navySelected
-                              : PomgtColors.canvas,
-                          borderRadius: PomgtRadii.borderSm,
-                          border: Border.all(
-                            color: selected
-                                ? PomgtColors.navySelectedBorder
-                                : PomgtColors.line,
-                          ),
-                        ),
+                        onTap: () => onSelect(id),
                         child: Row(
                           children: [
                             SizedBox(
                               width: 30,
                               height: 30,
                               child: Icon(
-                                Icons.inventory_2_outlined,
+                                LucideIcons.package,
                                 size: 16,
                                 color: selected
                                     ? PomgtColors.navy
@@ -472,7 +535,7 @@ class _ProductListPanel extends StatelessWidget {
                                     style: const TextStyle(
                                       color: PomgtColors.ink,
                                       fontSize: 13.5,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -490,6 +553,7 @@ class _ProductListPanel extends StatelessWidget {
                               ),
                             ),
                             PopupMenuButton<String>(
+                              popUpAnimationStyle: PomgtMotion.style(context),
                               tooltip: 'Acciones',
                               padding: EdgeInsets.zero,
                               onSelected: (value) {
@@ -501,7 +565,7 @@ class _ProductListPanel extends StatelessWidget {
                                   value: 'edit',
                                   child: Row(
                                     children: [
-                                      Icon(CupertinoIcons.pencil, size: 17),
+                                      Icon(LucideIcons.pencil, size: 17),
                                       SizedBox(width: 9),
                                       Text('Editar'),
                                     ],
@@ -512,7 +576,7 @@ class _ProductListPanel extends StatelessWidget {
                                   child: Row(
                                     children: [
                                       Icon(
-                                        CupertinoIcons.trash,
+                                        LucideIcons.trash2,
                                         size: 17,
                                         color: PomgtColors.danger,
                                       ),
@@ -530,7 +594,7 @@ class _ProductListPanel extends StatelessWidget {
                               child: const Padding(
                                 padding: EdgeInsets.all(8),
                                 child: Icon(
-                                  CupertinoIcons.ellipsis_vertical,
+                                  LucideIcons.ellipsisVertical,
                                   size: 17,
                                   color: PomgtColors.muted,
                                 ),
@@ -538,9 +602,9 @@ class _ProductListPanel extends StatelessWidget {
                             ),
                           ],
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
       ],
@@ -566,11 +630,11 @@ class _ProductSelectLike extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.secondaryInk,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
-        const Icon(CupertinoIcons.chevron_down, size: 13),
+        const Icon(LucideIcons.chevronDown, size: 13),
       ],
     ),
   );
@@ -597,7 +661,7 @@ class _ProductOverview extends StatelessWidget {
       future: _load(generic, id),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+          return const PomgtLoading();
         }
         if (snapshot.hasError) {
           return const Center(
@@ -616,141 +680,145 @@ class _ProductOverview extends StatelessWidget {
         final productionOrders = data['productionOrders'] ?? const [];
         final orderLines = data['orderLines'] ?? const [];
         final nonconformities = data['nonconformities'] ?? const [];
-        return SingleChildScrollView(
-          child: Column(
-            children: [
-              _ProductHero(
-                product: product,
-                onEdit: onEdit,
-                onDelete: onDelete,
-              ),
-              const SizedBox(height: 14),
-              _ProductKpis(
-                revisions: revisions.length,
-                customers: customerProducts.length,
-                boms: boms.length,
-                routings: routings.length,
-                documents: documents.length,
-                productionOrders: productionOrders.length,
-                requestedUnits: _sum(orderLines, 'quantity'),
-                completedUnits: _sum(productionOrders, 'completed_quantity'),
-              ),
-              const SizedBox(height: 14),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final stacked = constraints.maxWidth < 760;
-                  final left = Column(
-                    children: [
-                      _ProductInfoPanel(product: product, lookups: lookups),
-                      const SizedBox(height: 14),
-                      _ProductRowsPanel(
-                        title: 'Estructura de fabricación vinculada',
-                        link: boms.isEmpty ? null : 'Ver estructura completa',
-                        rows: boms,
-                        empty: 'Sin estructuras de fabricación.',
-                        icon: CupertinoIcons.square_stack_3d_up,
-                        titleField: 'name',
-                        fallbackTitleField: 'bom_code',
-                        subtitleFields: const ['bom_code', 'description'],
-                      ),
-                    ],
-                  );
-                  final right = Column(
-                    children: [
-                      _ProductTechnicalPanel(rows: revisions),
-                      const SizedBox(height: 14),
-                      _ProductRevisionPanel(rows: revisions),
-                    ],
-                  );
-                  if (stacked) {
-                    return Column(
-                      children: [left, const SizedBox(height: 14), right],
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              children: [
+                _ProductHero(
+                  product: product,
+                  onEdit: onEdit,
+                  onDelete: onDelete,
+                ),
+                const SizedBox(height: 14),
+                _ProductKpis(
+                  revisions: revisions.length,
+                  customers: customerProducts.length,
+                  boms: boms.length,
+                  routings: routings.length,
+                  documents: documents.length,
+                  productionOrders: productionOrders.length,
+                  requestedUnits: _sum(orderLines, 'quantity'),
+                  completedUnits: _sum(productionOrders, 'completed_quantity'),
+                ),
+                const SizedBox(height: 14),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final stacked = constraints.maxWidth < 760;
+                    final left = Column(
+                      children: [
+                        _ProductInfoPanel(product: product, lookups: lookups),
+                        const SizedBox(height: 14),
+                        _ProductRowsPanel(
+                          title: 'Estructura de fabricación vinculada',
+                          link: boms.isEmpty ? null : 'Ver estructura completa',
+                          rows: boms,
+                          empty: 'Sin estructuras de fabricación.',
+                          icon: LucideIcons.layers,
+                          titleField: 'name',
+                          fallbackTitleField: 'bom_code',
+                          subtitleFields: const ['bom_code', 'description'],
+                        ),
+                      ],
                     );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(flex: 4, child: left),
-                      const SizedBox(width: 14),
-                      Expanded(flex: 3, child: right),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 14),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final cards = [
-                    _ProductRoutingPanel(rows: routings),
-                    _ProductUsagePanel(rows: productionOrders),
-                    _ProductRowsPanel(
-                      title: 'Clientes que lo compran',
-                      link: customerProducts.isEmpty
-                          ? null
-                          : 'Ver todos (${customerProducts.length})',
-                      rows: customerProducts,
-                      empty: 'Sin clientes vinculados.',
-                      icon: CupertinoIcons.person_2,
-                      titleField: 'customer_product_name',
-                      fallbackTitleField: 'customer_sku',
-                      subtitleFields: const ['customer_sku', 'revision'],
-                    ),
-                  ];
-                  if (constraints.maxWidth < 860) {
-                    return Column(
+                    final right = Column(
+                      children: [
+                        _ProductTechnicalPanel(rows: revisions),
+                        const SizedBox(height: 14),
+                        _ProductRevisionPanel(rows: revisions),
+                      ],
+                    );
+                    if (stacked) {
+                      return Column(
+                        children: [left, const SizedBox(height: 14), right],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 4, child: left),
+                        const SizedBox(width: 14),
+                        Expanded(flex: 3, child: right),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 14),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cards = [
+                      _ProductRoutingPanel(rows: routings),
+                      _ProductUsagePanel(rows: productionOrders),
+                      _ProductRowsPanel(
+                        title: 'Clientes que lo compran',
+                        link: customerProducts.isEmpty
+                            ? null
+                            : 'Ver todos (${customerProducts.length})',
+                        rows: customerProducts,
+                        empty: 'Sin clientes vinculados.',
+                        icon: LucideIcons.users,
+                        titleField: 'customer_product_name',
+                        fallbackTitleField: 'customer_sku',
+                        subtitleFields: const ['customer_sku', 'revision'],
+                      ),
+                    ];
+                    if (constraints.maxWidth < 860) {
+                      return Column(
+                        children: [
+                          for (var i = 0; i < cards.length; i++) ...[
+                            if (i > 0) const SizedBox(height: 14),
+                            cards[i],
+                          ],
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         for (var i = 0; i < cards.length; i++) ...[
-                          if (i > 0) const SizedBox(height: 14),
-                          cards[i],
+                          if (i > 0) const SizedBox(width: 14),
+                          Expanded(child: cards[i]),
                         ],
                       ],
                     );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var i = 0; i < cards.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 14),
-                        Expanded(child: cards[i]),
-                      ],
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 14),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final left = _ProductRowsPanel(
-                    title: 'Documentos recientes',
-                    link: documents.isEmpty ? null : 'Ver todos',
-                    rows: documents,
-                    empty: 'Sin documentos.',
-                    icon: CupertinoIcons.doc_text,
-                    titleField: 'document_title',
-                    fallbackTitleField: 'document_id',
-                    subtitleFields: const ['document_type', 'created_at'],
-                  );
-                  final right = _ProductActivityPanel(
-                    productionOrders: productionOrders,
-                    revisions: revisions,
-                    nonconformities: nonconformities,
-                  );
-                  if (constraints.maxWidth < 760) {
-                    return Column(
-                      children: [left, const SizedBox(height: 14), right],
+                  },
+                ),
+                const SizedBox(height: 14),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final left = _ProductRowsPanel(
+                      title: 'Documentos recientes',
+                      link: documents.isEmpty ? null : 'Ver todos',
+                      rows: documents,
+                      empty: 'Sin documentos.',
+                      icon: LucideIcons.fileText,
+                      titleField: 'document_title',
+                      fallbackTitleField: 'document_id',
+                      subtitleFields: const ['document_type', 'created_at'],
                     );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: left),
-                      const SizedBox(width: 14),
-                      Expanded(child: right),
-                    ],
-                  );
-                },
-              ),
-            ],
+                    final right = _ProductActivityPanel(
+                      productionOrders: productionOrders,
+                      revisions: revisions,
+                      nonconformities: nonconformities,
+                    );
+                    if (constraints.maxWidth < 760) {
+                      return Column(
+                        children: [left, const SizedBox(height: 14), right],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: left),
+                        const SizedBox(width: 14),
+                        Expanded(child: right),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -848,7 +916,7 @@ class _ProductHero extends StatelessWidget {
                     style: const TextStyle(
                       color: PomgtColors.ink,
                       fontSize: 22,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -877,13 +945,13 @@ class _ProductHero extends StatelessWidget {
           children: [
             TextButton.icon(
               onPressed: onEdit,
-              icon: const Icon(CupertinoIcons.pencil, size: 17),
+              icon: const Icon(LucideIcons.pencil, size: 17),
               label: const Text('Editar producto'),
             ),
             IconButton(
               onPressed: onDelete,
               tooltip: 'Eliminar producto',
-              icon: const Icon(CupertinoIcons.trash, size: 18),
+              icon: const Icon(LucideIcons.trash2, size: 18),
             ),
           ],
         );
@@ -936,59 +1004,59 @@ class _ProductKpis extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       _ProductKpi(
-        'Revisiones',
+        'Versiones',
         revisions,
         'Versiones técnicas',
-        Icons.history_edu_outlined,
+        LucideIcons.notebookPen,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Clientes vinculados',
         customers,
         'SKUs comerciales',
-        Icons.groups_outlined,
+        LucideIcons.users,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Estructuras de fabricación',
         boms,
         'Recetas disponibles',
-        Icons.account_tree_outlined,
+        LucideIcons.gitBranch,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Rutas',
         routings,
         'Procesos definidos',
-        Icons.route_outlined,
+        LucideIcons.route,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Documentos',
         documents,
         'Archivos vinculados',
-        Icons.description_outlined,
+        LucideIcons.fileText,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'OPs generadas',
         productionOrders,
         'Producción vinculada',
-        Icons.precision_manufacturing_outlined,
+        LucideIcons.factory,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Unidades solicitadas',
         requestedUnits,
         'En líneas de pedido',
-        Icons.bar_chart_rounded,
+        LucideIcons.chartColumn,
         PomgtColors.blue,
       ),
       _ProductKpi(
         'Unidades completadas',
         completedUnits,
         'Producción cerrada',
-        Icons.task_alt_outlined,
+        LucideIcons.circleCheck,
         PomgtColors.mint,
       ),
     ];
@@ -1062,7 +1130,7 @@ class _ProductKpiTile extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.ink,
                   fontSize: 22,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                   height: 1,
                 ),
               ),
@@ -1074,7 +1142,7 @@ class _ProductKpiTile extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 11.5,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               Text(
@@ -1166,7 +1234,7 @@ class _ProductInfoPanel extends StatelessWidget {
       ];
       return _ProductTitledPanel(
         title: 'Resumen del producto',
-        icon: Icons.inventory_2_outlined,
+        icon: LucideIcons.package,
         link: null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1200,7 +1268,7 @@ class _ProductInfoPanel extends StatelessWidget {
                     border: Border.all(color: PomgtColors.line),
                   ),
                   child: const Icon(
-                    CupertinoIcons.cube_box,
+                    LucideIcons.box,
                     size: 42,
                     color: PomgtColors.blue,
                   ),
@@ -1261,9 +1329,9 @@ class _ProductTechnicalPanel extends StatelessWidget {
     if (revision == null) {
       return const _ProductTitledPanel(
         title: 'Especificaciones técnicas',
-        icon: Icons.tune_outlined,
+        icon: LucideIcons.slidersHorizontal,
         child: Text(
-          'Sin revisión técnica.',
+          'Sin versión técnica.',
           style: TextStyle(color: PomgtColors.muted),
         ),
       );
@@ -1283,7 +1351,7 @@ class _ProductTechnicalPanel extends StatelessWidget {
     ];
     return _ProductTitledPanel(
       title: 'Especificaciones técnicas',
-      icon: Icons.tune_outlined,
+      icon: LucideIcons.slidersHorizontal,
       link: 'Editar',
       child: Table(
         columnWidths: const {0: FlexColumnWidth(1), 1: FlexColumnWidth(1)},
@@ -1330,7 +1398,7 @@ class _TechnicalCell extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.ink,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -1346,7 +1414,7 @@ class _ProductRoutingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _ProductTitledPanel(
     title: 'Ruta de fabricación',
-    icon: Icons.route_outlined,
+    icon: LucideIcons.route,
     link: rows.isEmpty ? null : 'Ver ruta completa',
     child: rows.isEmpty
         ? const Text(
@@ -1364,7 +1432,7 @@ class _ProductRoutingPanel extends StatelessWidget {
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8),
                         child: Icon(
-                          CupertinoIcons.arrow_right,
+                          LucideIcons.arrowRight,
                           size: 15,
                           color: PomgtColors.subtle,
                         ),
@@ -1382,7 +1450,7 @@ class _ProductRoutingPanel extends StatelessWidget {
                               style: const TextStyle(
                                 color: PomgtColors.blue,
                                 fontSize: 11,
-                                fontWeight: FontWeight.w900,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -1395,7 +1463,7 @@ class _ProductRoutingPanel extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 12,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 3),
@@ -1431,7 +1499,7 @@ class _ProductUsagePanel extends StatelessWidget {
         .toList();
     return _ProductTitledPanel(
       title: 'Uso reciente del producto',
-      icon: Icons.show_chart_outlined,
+      icon: LucideIcons.chartLine,
       link: 'Últimas 6 semanas',
       child: SizedBox(
         height: 150,
@@ -1494,19 +1562,19 @@ class _ProductRevisionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _ProductTitledPanel(
-    title: 'Revisiones',
-    icon: Icons.history_edu_outlined,
+    title: 'Versiones',
+    icon: LucideIcons.notebookPen,
     link: rows.isEmpty ? null : 'Ver todas',
     child: rows.isEmpty
         ? const Text(
-            'Sin revisiones.',
+            'Sin versiones.',
             style: TextStyle(color: PomgtColors.muted),
           )
         : Column(
             children: rows.take(4).map((row) {
               return _ProductMiniRow(
-                icon: Icons.history_edu_outlined,
-                title: row['revision_code']?.toString() ?? 'Revisión',
+                icon: LucideIcons.notebookPen,
+                title: row['revision_code']?.toString() ?? 'Versión',
                 subtitle:
                     [
                           UiCopy.enumLabel(row['status']?.toString() ?? ''),
@@ -1599,7 +1667,7 @@ class _ProductActivityPanel extends StatelessWidget {
       ),
       ...revisions.map(
         (row) => _ProductActivity(
-          row['revision_code']?.toString() ?? 'Revisión',
+          row['revision_code']?.toString() ?? 'Versión',
           UiCopy.enumLabel(row['status']?.toString() ?? ''),
           _date(row['updated_at'] ?? row['created_at']),
           PomgtColors.blue,
@@ -1620,7 +1688,7 @@ class _ProductActivityPanel extends StatelessWidget {
     );
     return _ProductTitledPanel(
       title: 'Actividad reciente',
-      icon: Icons.timeline_outlined,
+      icon: LucideIcons.workflow,
       link: rows.isEmpty ? null : 'Ver toda',
       child: rows.isEmpty
           ? const Text(
@@ -1630,7 +1698,7 @@ class _ProductActivityPanel extends StatelessWidget {
           : Column(
               children: rows.take(5).map((row) {
                 return _ProductMiniRow(
-                  icon: CupertinoIcons.circle_fill,
+                  icon: LucideIcons.circle,
                   iconColor: row.color,
                   title: row.title,
                   subtitle: row.subtitle,
@@ -1684,7 +1752,7 @@ class _ProductTitledPanel extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 16,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -1700,7 +1768,7 @@ class _ProductTitledPanel extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
           ],
@@ -1769,7 +1837,7 @@ class _ProductMiniRow extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.ink,
                   fontSize: 13,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               if (subtitle.trim().isNotEmpty) ...[
@@ -1796,7 +1864,7 @@ class _ProductMiniRow extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -1830,7 +1898,7 @@ class _ProductKV extends StatelessWidget {
         style: const TextStyle(
           color: PomgtColors.ink,
           fontSize: 13,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ],
@@ -1844,24 +1912,27 @@ class _PlainStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = active ? PomgtColors.mint : PomgtColors.danger;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 7),
-        Text(
-          active ? 'Activo' : 'Inactivo',
-          style: TextStyle(
-            color: color,
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
+    return PomgtAnimatedValue(
+      value: active,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
-        ),
-      ],
+          const SizedBox(width: 7),
+          Text(
+            active ? 'Activo' : 'Inactivo',
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1873,26 +1944,29 @@ class _ProductStatusText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _statusColor(status);
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            UiCopy.enumLabel(status),
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: PomgtColors.ink,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+    return PomgtAnimatedValue(
+      value: status,
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              UiCopy.enumLabel(status),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: PomgtColors.ink,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1906,7 +1980,7 @@ class _ProductProgress extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: [
       Expanded(
-        child: LinearProgressIndicator(
+        child: PomgtProgressIndicator(
           value: value,
           minHeight: 8,
           backgroundColor: PomgtColors.surfaceAlt,
@@ -1922,7 +1996,7 @@ class _ProductProgress extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 12,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -1935,11 +2009,10 @@ class _ProductEmptyDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const _ProductPanel(
-    child: Center(
-      child: Text(
-        'Selecciona un producto para ver su expediente.',
-        style: TextStyle(color: PomgtColors.muted),
-      ),
+    child: EmptyState(
+      icon: LucideIcons.box,
+      title: 'Selecciona un producto',
+      message: 'Su expediente y relaciones aparecerán aquí.',
     ),
   );
 }
@@ -2012,7 +2085,7 @@ class _ProductDetail extends StatelessWidget {
     final id = product['id'].toString();
 
     Future<void> edit() async {
-      final changed = await showDialog<bool>(
+      final changed = await showPomgtDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => EntityFormDialog(
@@ -2025,11 +2098,8 @@ class _ProductDetail extends StatelessWidget {
             'material_category_id',
             'product_type',
           },
-          referenceFilters: const {
-            'product_type_catalog_id': {'system_class': 'finished_good'},
-          },
           title: 'Editar producto',
-          icon: Icons.inventory_2_outlined,
+          icon: LucideIcons.package,
         ),
       );
       if (changed == true && context.mounted)
@@ -2041,12 +2111,11 @@ class _ProductDetail extends StatelessWidget {
       child: Column(
         children: [
           DetailHeader(
-            icon: Icons.inventory_2_outlined,
+            icon: LucideIcons.package,
             title: product['name']?.toString() ?? 'Producto',
             subtitle:
                 '${product['sku']} · ${UiCopy.enumLabel(product['product_type']?.toString() ?? '')}',
-            help:
-                'La definición estable vive en el producto; las especificaciones técnicas evolucionan mediante revisiones.',
+            help: 'La definición estable vive en el producto; las especificaciones técnicas evolucionan mediante versiones.',
             onEdit: edit,
           ),
           Expanded(
@@ -2055,13 +2124,13 @@ class _ProductDetail extends StatelessWidget {
                 DetailSection(
                   label: 'General',
                   help: 'Datos maestros, categoría y unidad.',
-                  icon: Icons.dashboard_outlined,
+                  icon: LucideIcons.layoutDashboard,
                   child: _ProductSummary(product: product),
                 ),
                 DetailSection(
-                  label: 'Revisiones',
+                  label: 'Versiones',
                   help: 'Versiones técnicas del producto.',
-                  icon: Icons.history_edu_outlined,
+                  icon: LucideIcons.notebookPen,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -2069,20 +2138,18 @@ class _ProductDetail extends StatelessWidget {
                       repository: generic,
                       lookups: lookups,
                       fixedValues: {'product_id': id},
-                      title: 'Revisiones',
-                      description:
-                          'Versiona dimensiones, material, color, peso, tolerancias, calidad, empaque e imagen. Una revisión activa representa la especificación vigente.',
+                      title: 'Versiones',
+                      description: 'Versiona dimensiones, material, color, peso, tolerancias, calidad, empaque e imagen. Una versión activa representa la especificación vigente.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Especificaciones',
-                  help: 'Tolerancias y valores por revisión.',
-                  icon: Icons.tune_outlined,
+                  help: 'Tolerancias y valores por versión.',
+                  icon: LucideIcons.slidersHorizontal,
                   child: NestedRelationPanel(
-                    title: 'Especificaciones por revisión',
-                    help:
-                        'Selecciona una revisión para administrar tolerancias y valores personalizados sin alterar revisiones anteriores.',
+                    title: 'Especificaciones por versión',
+                    help: 'Selecciona una versión para administrar tolerancias y valores personalizados sin alterar versiones anteriores.',
                     parentTable: 'product_revisions',
                     parentFilter: {'product_id': id},
                     repository: generic,
@@ -2092,8 +2159,7 @@ class _ProductDetail extends StatelessWidget {
                         table: 'product_tolerances',
                         label: 'Tolerancias',
                         foreignKey: 'product_revision_id',
-                        help:
-                            'Valores nominales, límites, unidad y método de medición.',
+                        help: 'Valores nominales, límites, unidad y método de medición.',
                       ),
                       ChildTabDefinition(
                         table: 'product_revision_custom_values',
@@ -2107,7 +2173,7 @@ class _ProductDetail extends StatelessWidget {
                 DetailSection(
                   label: 'Campos personalizados',
                   help: 'Propiedades configurables por industria.',
-                  icon: Icons.dynamic_form_outlined,
+                  icon: LucideIcons.listFilter,
                   child: _DynamicFieldsPanel(
                     product: product,
                     repository: generic,
@@ -2116,8 +2182,8 @@ class _ProductDetail extends StatelessWidget {
                 ),
                 DetailSection(
                   label: 'Clientes',
-                  help: 'Clientes, SKUs y revisiones comerciales.',
-                  icon: Icons.groups_outlined,
+                  help: 'Clientes, SKUs y versiones comerciales.',
+                  icon: LucideIcons.users,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -2126,15 +2192,14 @@ class _ProductDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'product_id': id},
                       title: 'Clientes que compran este producto',
-                      description:
-                          'Relaciona el producto con el SKU, nombre, revisión y dirección de envío utilizados por cada cliente.',
+                      description: 'Relaciona el producto con el SKU, nombre, versión y dirección de envío utilizados por cada cliente.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Estructura de fabricación',
                   help: 'Recetas para fabricar el producto.',
-                  icon: Icons.account_tree_outlined,
+                  icon: LucideIcons.gitBranch,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -2143,15 +2208,14 @@ class _ProductDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'product_id': id},
                       title: 'Estructuras de fabricación del producto',
-                      description:
-                          'Recetas de materiales disponibles para fabricar el producto.',
+                      description: 'Recetas de materiales disponibles para fabricar el producto.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Ruta de fabricación',
                   help: 'Secuencias de operación disponibles.',
-                  icon: Icons.route_outlined,
+                  icon: LucideIcons.route,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -2160,21 +2224,19 @@ class _ProductDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'product_id': id},
                       title: 'Rutas de fabricación',
-                      description:
-                          'Secuencias de operaciones disponibles para fabricar el producto.',
+                      description: 'Secuencias de operaciones disponibles para fabricar el producto.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Documentos',
                   help: 'Planos, fichas, diseños y certificados.',
-                  icon: Icons.folder_copy_outlined,
+                  icon: LucideIcons.folders,
                   child: LinkedDocumentsPanel(
                     entityField: 'product_id',
                     entityId: id,
                     title: 'Documentos del producto',
-                    help:
-                        'Planos, fichas técnicas, diseños, especificaciones, fotografías y otros archivos relacionados con el producto.',
+                    help: 'Planos, fichas técnicas, diseños, especificaciones, fotografías y otros archivos relacionados con el producto.',
                     documentTypes: const [
                       'Ficha técnica',
                       'Plano',
@@ -2276,59 +2338,63 @@ class _ProductSummary extends StatelessWidget {
             product['is_active'] == true ? 'Activo' : 'Inactivo',
           ),
         ];
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                product['description']?.toString() ?? 'Sin descripción.',
-                style: const TextStyle(
-                  color: PomgtColors.secondaryInk,
-                  fontSize: 14.5,
-                  height: 1.5,
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  product['description']?.toString() ?? 'Sin descripción.',
+                  style: const TextStyle(
+                    color: PomgtColors.secondaryInk,
+                    fontSize: 14.5,
+                    height: 1.5,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 26),
-              LayoutBuilder(
-                builder: (context, c) {
-                  final cols = c.maxWidth >= 900 ? 4 : 2;
-                  final w = (c.maxWidth - (cols - 1) * 26) / cols;
-                  return Wrap(
-                    spacing: 26,
-                    runSpacing: 22,
-                    children: entries
-                        .map(
-                          (e) => SizedBox(
-                            width: w,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  e.key,
-                                  style: const TextStyle(
-                                    color: PomgtColors.muted,
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w600,
+                const SizedBox(height: 26),
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final cols = c.maxWidth >= 900 ? 4 : 2;
+                    final w = (c.maxWidth - (cols - 1) * 26) / cols;
+                    return Wrap(
+                      spacing: 26,
+                      runSpacing: 22,
+                      children: entries
+                          .map(
+                            (e) => SizedBox(
+                              width: w,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    e.key,
+                                    style: const TextStyle(
+                                      color: PomgtColors.muted,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  e.value,
-                                  style: const TextStyle(
-                                    color: PomgtColors.ink,
-                                    fontWeight: FontWeight.w600,
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    e.value,
+                                    style: const TextStyle(
+                                      color: PomgtColors.ink,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-              ),
-            ],
+                          )
+                          .toList(),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -2352,27 +2418,34 @@ class _DynamicFieldsPanel extends StatelessWidget {
     final filter = category == null
         ? const <String, dynamic>{}
         : {'category_id': category};
-    return DefaultTabController(
+    return PomgtTabController(
       length: 2,
       child: Column(
         children: [
           Container(
-            color: PomgtColors.surfaceAlt,
             padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: PomgtColors.line)),
+            ),
             child: const TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               dividerColor: Colors.transparent,
+              indicatorColor: PomgtColors.blue,
+              labelColor: PomgtColors.ink,
+              unselectedLabelColor: PomgtColors.muted,
+              labelStyle: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+              ),
               tabs: [
                 HelpTab(
                   label: 'Definiciones',
-                  help:
-                      'Campos personalizados disponibles para la categoría o producto.',
+                  help: 'Campos personalizados disponibles para la categoría o producto.',
                 ),
                 HelpTab(
                   label: 'Opciones',
-                  help:
-                      'Opciones permitidas para campos de selección o selección múltiple.',
+                  help: 'Opciones permitidas para campos de selección o selección múltiple.',
                 ),
               ],
             ),
@@ -2388,14 +2461,12 @@ class _DynamicFieldsPanel extends StatelessWidget {
                     lookups: lookups,
                     fixedValues: filter,
                     title: 'Campos personalizados',
-                    description:
-                        'Crea propiedades específicas por industria sin modificar código, por ejemplo adhesivo, core, número de tintas, aleación, tratamiento o acabado.',
+                    description: 'Crea propiedades específicas por industria sin modificar código, por ejemplo adhesivo, core, número de tintas, aleación, tratamiento o acabado.',
                   ),
                 ),
                 NestedRelationPanel(
                   title: 'Opciones de campos',
-                  help:
-                      'Para campos de selección define aquí sus opciones permitidas.',
+                  help: 'Para campos de selección define aquí sus opciones permitidas.',
                   parentTable: 'product_custom_field_definitions',
                   parentFilter: filter,
                   repository: repository,
@@ -2405,8 +2476,7 @@ class _DynamicFieldsPanel extends StatelessWidget {
                       table: 'product_custom_field_options',
                       label: 'Opciones',
                       foreignKey: 'field_definition_id',
-                      help:
-                          'Valor interno, etiqueta visible y orden de cada opción.',
+                      help: 'Valor interno, etiqueta visible y orden de cada opción.',
                     ),
                   ],
                 ),

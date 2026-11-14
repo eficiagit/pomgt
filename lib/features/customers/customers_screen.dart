@@ -1,6 +1,12 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
@@ -8,15 +14,18 @@ import '../../core/utils/app_notice.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/detail_sections.dart';
 import '../../core/utils/error_copy.dart';
+import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/entity_crud_panel.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../core/widgets/linked_documents_panel.dart';
 import '../../core/widgets/record_workspace.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/customer_repository.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import 'customer_form_dialog.dart';
+import '../../core/widgets/section_title.dart';
 
 class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key});
@@ -65,12 +74,20 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> customer) async {
-    final confirmed = await showDialog<bool>(
+    final name = customer['trade_name']?.toString().trim().isNotEmpty == true
+        ? customer['trade_name'].toString()
+        : (customer['legal_name']?.toString() ?? 'este cliente');
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Eliminar cliente'),
-        content: const Text(
-          'Esta acción no se puede deshacer. Los registros relacionados pueden impedir la eliminación para proteger la trazabilidad.',
+        title: pomgtDialogTitle(
+          context,
+          'Eliminar cliente',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text('Esta acción no se puede deshacer.'),
         ),
         actions: [
           TextButton(
@@ -79,30 +96,69 @@ class _CustomersScreenState extends State<CustomersScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar'),
+            child: const Text('Continuar'),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
+
+    final confirmedDetails = await showPomgtDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: pomgtDialogTitle(
+          context,
+          '¿Eliminar a $name?',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: const Text(
+            'Se eliminarán también sus direcciones, contactos y los pedidos que no tengan producción iniciada.\n\n'
+            'Los productos que le pertenezcan no se borrarán, solo se desvincularán del cliente.\n\n'
+            'Si el cliente tiene producción en proceso, entregas, reclamos o no conformidades registradas, no podrá eliminarse.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: PomgtColors.danger),
+            child: const Text('Eliminar definitivamente'),
+          ),
+        ],
+      ),
+    );
+    if (confirmedDetails != true || !mounted) return;
+
     try {
-      await context.read<GenericRepository>().deleteRow(
-        Phase1Schema.tables['customers']!,
-        customer,
+      await context.read<CustomerRepository>().deleteCustomer(
+        customer['id'].toString(),
       );
       if (!mounted) return;
       setState(() => selectedId = null);
       context.read<LookupRepository>().invalidate('customers');
       context.read<CustomersController>().refresh();
       _reload();
+      showPomgtSnackBar(context, 'Cliente eliminado.');
     } catch (error) {
       if (!mounted) return;
-      showPomgtSnackBar(context, error.toString(), isError: true);
+      showPomgtSnackBar(
+        context,
+        ErrorCopy.message(
+          error,
+          fallback: 'No fue posible eliminar el cliente.',
+        ),
+        isError: true,
+      );
     }
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => CustomerFormDialog(original: row),
@@ -146,47 +202,68 @@ class _CustomersScreenState extends State<CustomersScreen> {
           (row) => row?['id']?.toString() == selectedId,
           orElse: () => filtered.isEmpty ? null : filtered.first,
         );
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(28, 22, 28, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _CustomersTitle(onCreate: () => _edit()),
-              const SizedBox(height: 16),
-              Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 410,
-                      child: _CustomerListPanel(
-                        rows: filtered,
-                        total: rows.length,
-                        selectedId: selectedId,
-                        search: search,
-                        loading:
-                            snapshot.connectionState == ConnectionState.waiting,
-                        onSearch: (value) => setState(() => search = value),
-                        onSelect: (id) => setState(() => selectedId = id),
-                        onEdit: _edit,
-                        onDelete: _delete,
-                        onRefresh: _reload,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: selected == null
-                          ? const _CustomerEmptyDetail()
-                          : _CustomerOverview(
-                              key: ValueKey(selected['id']),
-                              customer: selected,
-                              onEdit: () => _edit(selected),
-                            ),
-                    ),
-                  ],
-                ),
+        return LayoutBuilder(
+          builder: (context, pageConstraints) {
+            final compact = pageConstraints.maxWidth < 720;
+            final wide = pageConstraints.maxWidth >= 980;
+            final listPanel = _CustomerListPanel(
+              rows: filtered,
+              total: rows.length,
+              selectedId: selectedId,
+              search: search,
+              loading: snapshot.connectionState == ConnectionState.waiting,
+              onSearch: (value) => setState(() => search = value),
+              onSelect: (id) => setState(() => selectedId = id),
+              onEdit: _edit,
+              onDelete: _delete,
+              onRefresh: _reload,
+            );
+            final detailPanel = selected == null
+                ? const _CustomerEmptyDetail()
+                : _CustomerOverview(
+                    key: ValueKey(selected['id']),
+                    customer: selected,
+                    onEdit: () => _edit(selected),
+                  );
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 12 : 28,
+                compact ? 12 : 22,
+                compact ? 12 : 28,
+                compact ? 16 : 28,
               ),
-            ],
-          ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _CustomersTitle(onCreate: () => _edit()),
+                  SizedBox(height: compact ? 12 : 16),
+                  Expanded(
+                    child: wide
+                        ? Row(
+                            children: [
+                              SizedBox(width: 410, child: listPanel),
+                              const SizedBox(width: 16),
+                              Expanded(child: detailPanel),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              SizedBox(
+                                height: (pageConstraints.maxHeight * .34).clamp(
+                                  210.0,
+                                  320.0,
+                                ),
+                                child: listPanel,
+                              ),
+                              const SizedBox(height: 16),
+                              Expanded(child: detailPanel),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -207,10 +284,7 @@ class _CustomersTitle extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(
-                  'Clientes',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                const SectionTitle('Clientes', icon: LucideIcons.building2),
                 const SizedBox(width: 8),
                 const InfoTip(
                   'Gestiona clientes, contactos, productos, documentos y trazabilidad.',
@@ -224,7 +298,7 @@ class _CustomersTitle extends StatelessWidget {
               style: TextStyle(
                 color: PomgtColors.muted,
                 fontSize: 14,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -233,7 +307,7 @@ class _CustomersTitle extends StatelessWidget {
       const SizedBox(width: 18),
       FilledButton.icon(
         onPressed: onCreate,
-        icon: const Icon(CupertinoIcons.add, size: 18),
+        icon: const Icon(LucideIcons.plus, size: 18),
         label: const Text('Nuevo cliente'),
       ),
     ],
@@ -289,7 +363,7 @@ class _CustomerListPanel extends StatelessWidget {
                         onChanged: onSearch,
                         decoration: const InputDecoration(
                           hintText: 'Buscar clientes...',
-                          prefixIcon: Icon(CupertinoIcons.search, size: 20),
+                          prefixIcon: Icon(LucideIcons.search, size: 20),
                           prefixIconConstraints: BoxConstraints(minWidth: 46),
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 18,
@@ -303,7 +377,7 @@ class _CustomerListPanel extends StatelessWidget {
                   IconButton(
                     tooltip: 'Actualizar',
                     onPressed: onRefresh,
-                    icon: const Icon(CupertinoIcons.refresh, size: 18),
+                    icon: const Icon(LucideIcons.refreshCw, size: 18),
                   ),
                 ],
               ),
@@ -325,14 +399,14 @@ class _CustomerListPanel extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
         const SizedBox(height: 8),
         Expanded(
           child: loading
-              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              ? const PomgtLoading()
               : rows.isEmpty
               ? const Center(
                   child: Text(
@@ -340,40 +414,39 @@ class _CustomerListPanel extends StatelessWidget {
                     style: TextStyle(color: PomgtColors.muted),
                   ),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    final id = row['id']?.toString();
-                    final selected = id == selectedId;
-                    return InkWell(
-                      borderRadius: PomgtRadii.borderSm,
-                      onTap: () => onSelect(id),
-                      child: Container(
+              : ScrollToTopArea(
+                  padding: const EdgeInsets.all(10),
+                  builder: (context, controller) => PomgtListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    itemCount: rows.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final row = rows[index];
+                      final id = row['id']?.toString();
+                      final selected = id == selectedId;
+                      return SmoothHover(
+                        selected: selected,
+                        selectedColor: PomgtColors.navySelected,
+                        hoverColor: PomgtColors.surfaceAlt.withValues(
+                          alpha: .55,
+                        ),
+                        borderColor: selected
+                            ? PomgtColors.navySelectedBorder
+                            : PomgtColors.line,
+                        lift: .2,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 14,
                         ),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? PomgtColors.navySelected
-                              : PomgtColors.canvas,
-                          borderRadius: PomgtRadii.borderSm,
-                          border: Border.all(
-                            color: selected
-                                ? PomgtColors.navySelectedBorder
-                                : PomgtColors.line,
-                          ),
-                        ),
+                        onTap: () => onSelect(id),
                         child: Row(
                           children: [
                             SizedBox(
                               width: 30,
                               height: 30,
                               child: Icon(
-                                Icons.business_outlined,
+                                LucideIcons.building2,
                                 size: 16,
                                 color: selected
                                     ? PomgtColors.navy
@@ -392,7 +465,7 @@ class _CustomerListPanel extends StatelessWidget {
                                     style: const TextStyle(
                                       color: PomgtColors.ink,
                                       fontSize: 13.5,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -403,13 +476,14 @@ class _CustomerListPanel extends StatelessWidget {
                                     style: const TextStyle(
                                       color: PomgtColors.muted,
                                       fontSize: 12,
-                                      fontWeight: FontWeight.w700,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                             PopupMenuButton<String>(
+                              popUpAnimationStyle: PomgtMotion.style(context),
                               tooltip: 'Acciones',
                               padding: EdgeInsets.zero,
                               onSelected: (value) {
@@ -421,7 +495,7 @@ class _CustomerListPanel extends StatelessWidget {
                                   value: 'edit',
                                   child: Row(
                                     children: [
-                                      Icon(CupertinoIcons.pencil, size: 17),
+                                      Icon(LucideIcons.pencil, size: 17),
                                       SizedBox(width: 9),
                                       Text('Editar'),
                                     ],
@@ -432,7 +506,7 @@ class _CustomerListPanel extends StatelessWidget {
                                   child: Row(
                                     children: [
                                       Icon(
-                                        CupertinoIcons.trash,
+                                        LucideIcons.trash2,
                                         size: 17,
                                         color: PomgtColors.danger,
                                       ),
@@ -450,7 +524,7 @@ class _CustomerListPanel extends StatelessWidget {
                               child: const Padding(
                                 padding: EdgeInsets.all(8),
                                 child: Icon(
-                                  CupertinoIcons.ellipsis_vertical,
+                                  LucideIcons.ellipsisVertical,
                                   size: 17,
                                   color: PomgtColors.muted,
                                 ),
@@ -458,9 +532,9 @@ class _CustomerListPanel extends StatelessWidget {
                             ),
                           ],
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
       ],
@@ -476,7 +550,10 @@ class _SelectLike extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     height: 38,
     padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: BoxDecoration(border: Border.all(color: PomgtColors.line)),
+    decoration: BoxDecoration(
+      borderRadius: PomgtRadii.borderSm,
+      border: Border.all(color: PomgtColors.lineStrong),
+    ),
     child: Row(
       children: [
         Expanded(
@@ -486,11 +563,11 @@ class _SelectLike extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.secondaryInk,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
-        const Icon(CupertinoIcons.chevron_down, size: 13),
+        const Icon(LucideIcons.chevronDown, size: 13),
       ],
     ),
   );
@@ -514,7 +591,7 @@ class _CustomerOverview extends StatelessWidget {
       future: repo.detail(id),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+          return const PomgtLoading();
         }
         if (snapshot.hasError) {
           return Center(
@@ -537,95 +614,113 @@ class _CustomerOverview extends StatelessWidget {
         final deliveries = _list(data['deliveries']);
         final claims = _list(data['claims']);
         final production = _productionTotal(orders);
-        return SingleChildScrollView(
-          child: Column(
-            children: [
-              _CustomerHero(customer: customer, onEdit: onEdit),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final stacked = constraints.maxWidth < 860;
+            final row1 = <Widget>[
+              _InfoPanel(customer: customer, lookups: lookups),
               const SizedBox(height: 14),
-              _CustomerKpis(
-                orders: orders.length,
-                products: products.length,
-                documents: documents.length,
-                deliveries: deliveries.length,
-                claims: claims.length,
-                production: production,
+              _RequirementPanel(rows: requirements),
+            ];
+            final row1b = <Widget>[
+              _SimpleRowsPanel(
+                title: 'Contactos',
+                link: 'Ver todos (${contacts.length})',
+                rows: contacts,
+                empty: 'Sin contactos.',
+                icon: LucideIcons.user,
+                titleField: 'full_name',
+                subtitleFields: const ['job_title', 'department'],
               ),
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      children: [
-                        _InfoPanel(customer: customer, lookups: lookups),
-                        const SizedBox(height: 14),
-                        _RequirementPanel(rows: requirements),
-                      ],
+              _AddressPanel(rows: addresses),
+            ];
+            final row2a = _SimpleRowsPanel(
+              title: 'Productos vinculados',
+              link: 'Ver todos (${products.length})',
+              rows: products,
+              empty: 'Sin productos vinculados.',
+              icon: LucideIcons.box,
+              titleField: 'customer_product_name',
+              fallbackTitleField: 'customer_sku',
+              subtitleFields: const ['customer_sku', 'revision'],
+            );
+            final row2b = _SimpleRowsPanel(
+              title: 'Documentos recientes',
+              link: 'Ver todos',
+              rows: documents,
+              empty: 'Sin documentos.',
+              icon: LucideIcons.fileText,
+              titleField: 'document_title',
+              fallbackTitleField: 'document_id',
+              subtitleFields: const ['document_type', 'created_at'],
+            );
+            final row2c = _ActivityPanel(
+              orders: orders,
+              deliveries: deliveries,
+              claims: claims,
+            );
+            return ScrollToTopArea(
+              padding: const EdgeInsets.all(16),
+              builder: (context, controller) => SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  children: [
+                    _CustomerHero(customer: customer, onEdit: onEdit),
+                    const SizedBox(height: 14),
+                    _CustomerKpis(
+                      orders: orders.length,
+                      products: products.length,
+                      documents: documents.length,
+                      deliveries: deliveries.length,
+                      claims: claims.length,
+                      production: production,
                     ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      children: [
-                        _SimpleRowsPanel(
-                          title: 'Contactos',
-                          link: 'Ver todos (${contacts.length})',
-                          rows: contacts,
-                          empty: 'Sin contactos.',
-                          icon: CupertinoIcons.person,
-                          titleField: 'full_name',
-                          subtitleFields: const ['job_title', 'department'],
-                        ),
-                        const SizedBox(height: 14),
-                        _AddressPanel(rows: addresses),
-                      ],
-                    ),
-                  ),
-                ],
+                    const SizedBox(height: 14),
+                    if (stacked)
+                      Column(
+                        children: [
+                          ...row1,
+                          const SizedBox(height: 14),
+                          ...row1b,
+                        ],
+                      )
+                    else
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 3, child: Column(children: row1)),
+                          const SizedBox(width: 14),
+                          Expanded(flex: 3, child: Column(children: row1b)),
+                        ],
+                      ),
+                    const SizedBox(height: 14),
+                    if (stacked)
+                      Column(
+                        children: [
+                          row2a,
+                          const SizedBox(height: 14),
+                          row2b,
+                          const SizedBox(height: 14),
+                          row2c,
+                        ],
+                      )
+                    else
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: row2a),
+                          const SizedBox(width: 14),
+                          Expanded(child: row2b),
+                          const SizedBox(width: 14),
+                          Expanded(child: row2c),
+                        ],
+                      ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _SimpleRowsPanel(
-                      title: 'Productos vinculados',
-                      link: 'Ver todos (${products.length})',
-                      rows: products,
-                      empty: 'Sin productos vinculados.',
-                      icon: CupertinoIcons.cube_box,
-                      titleField: 'customer_product_name',
-                      fallbackTitleField: 'customer_sku',
-                      subtitleFields: const ['customer_sku', 'revision'],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _SimpleRowsPanel(
-                      title: 'Documentos recientes',
-                      link: 'Ver todos',
-                      rows: documents,
-                      empty: 'Sin documentos.',
-                      icon: CupertinoIcons.doc_text,
-                      titleField: 'document_title',
-                      fallbackTitleField: 'document_id',
-                      subtitleFields: const ['document_type', 'created_at'],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _ActivityPanel(
-                      orders: orders,
-                      deliveries: deliveries,
-                      claims: claims,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -656,7 +751,7 @@ class _CustomerHero extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 22,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -672,7 +767,7 @@ class _CustomerHero extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -680,7 +775,7 @@ class _CustomerHero extends StatelessWidget {
         ),
         TextButton.icon(
           onPressed: onEdit,
-          icon: const Icon(CupertinoIcons.pencil, size: 17),
+          icon: const Icon(LucideIcons.pencil, size: 17),
           label: const Text('Editar cliente'),
         ),
       ],
@@ -711,37 +806,32 @@ class _CustomerKpis extends StatelessWidget {
       _CustomerKpi(
         'Pedidos activos',
         orders,
-        CupertinoIcons.doc_plaintext,
+        LucideIcons.fileText,
         PomgtColors.blue,
       ),
       _CustomerKpi(
         'Productos vinculados',
         products,
-        CupertinoIcons.cube_box,
+        LucideIcons.box,
         PomgtColors.blue,
       ),
       _CustomerKpi(
         'Documentos',
         documents,
-        CupertinoIcons.doc_text,
+        LucideIcons.fileText,
         PomgtColors.blue,
       ),
-      _CustomerKpi(
-        'Entregas',
-        deliveries,
-        Icons.local_shipping_outlined,
-        PomgtColors.blue,
-      ),
+      _CustomerKpi('Entregas', deliveries, LucideIcons.truck, PomgtColors.blue),
       _CustomerKpi(
         'Reclamaciones',
         claims,
-        CupertinoIcons.exclamationmark_triangle,
+        LucideIcons.triangleAlert,
         PomgtColors.danger,
       ),
       _CustomerKpi(
         'Producción acumulada',
         production,
-        CupertinoIcons.chart_bar,
+        LucideIcons.chartColumn,
         PomgtColors.blue,
       ),
     ];
@@ -807,7 +897,7 @@ class _CustomerKpiTile extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.ink,
                   fontSize: 22,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   height: 1,
                 ),
               ),
@@ -819,7 +909,7 @@ class _CustomerKpiTile extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                   height: 1.2,
                 ),
               ),
@@ -875,7 +965,7 @@ class _InfoPanel extends StatelessWidget {
       ];
       return _TitledPanel(
         title: 'Información general',
-        icon: Icons.badge_outlined,
+        icon: LucideIcons.badge,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final columns = constraints.maxWidth >= 680 ? 2 : 1;
@@ -906,7 +996,7 @@ class _RequirementPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _TitledPanel(
     title: 'Requisitos del cliente',
-    icon: Icons.fact_check_outlined,
+    icon: LucideIcons.clipboardCheck,
     link: rows.isEmpty ? null : 'Ver todos',
     child: rows.isEmpty
         ? const Text(
@@ -916,7 +1006,7 @@ class _RequirementPanel extends StatelessWidget {
         : Column(
             children: rows.take(4).map((row) {
               return _MiniRow(
-                icon: CupertinoIcons.doc_checkmark,
+                icon: LucideIcons.fileCheck,
                 title: row['title']?.toString() ?? 'Requisito',
                 subtitle: row['requirement_type']?.toString() ?? '',
               );
@@ -982,7 +1072,7 @@ class _AddressPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _TitledPanel(
     title: 'Direcciones',
-    icon: Icons.location_on_outlined,
+    icon: LucideIcons.mapPin,
     link: rows.isEmpty ? null : 'Ver todas (${rows.length})',
     child: rows.isEmpty
         ? const Text(
@@ -1004,7 +1094,7 @@ class _AddressPanel extends StatelessWidget {
                       )
                       .join(', ');
               return _MiniRow(
-                icon: CupertinoIcons.location,
+                icon: LucideIcons.mapPin,
                 title: row['label']?.toString() ?? 'Dirección',
                 subtitle: address,
                 trailing: UiCopy.enumLabel(
@@ -1060,7 +1150,7 @@ class _ActivityPanel extends StatelessWidget {
     );
     return _TitledPanel(
       title: 'Actividad reciente',
-      icon: Icons.timeline_outlined,
+      icon: LucideIcons.workflow,
       link: rows.isEmpty ? null : 'Ver todas',
       child: rows.isEmpty
           ? const Text(
@@ -1070,7 +1160,7 @@ class _ActivityPanel extends StatelessWidget {
           : Column(
               children: rows.take(4).map((row) {
                 return _MiniRow(
-                  icon: CupertinoIcons.circle_fill,
+                  icon: LucideIcons.circle,
                   iconColor: row.color,
                   title: row.title,
                   subtitle: row.subtitle,
@@ -1126,7 +1216,7 @@ class _TitledPanel extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 16,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -1141,7 +1231,7 @@ class _TitledPanel extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.blue,
                   fontSize: 12,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
           ],
@@ -1211,7 +1301,7 @@ class _MiniRow extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.ink,
                   fontSize: 13,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               if (subtitle.trim().isNotEmpty) ...[
@@ -1223,7 +1313,7 @@ class _MiniRow extends StatelessWidget {
                   style: const TextStyle(
                     color: PomgtColors.muted,
                     fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                     height: 1.25,
                   ),
                 ),
@@ -1238,7 +1328,7 @@ class _MiniRow extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -1252,11 +1342,10 @@ class _CustomerEmptyDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const _CustomerPanel(
-    child: Center(
-      child: Text(
-        'Selecciona un cliente para ver su expediente.',
-        style: TextStyle(color: PomgtColors.muted),
-      ),
+    child: EmptyState(
+      icon: LucideIcons.building2,
+      title: 'Selecciona un cliente',
+      message: 'Su expediente y relaciones aparecerán aquí.',
     ),
   );
 }
@@ -1329,7 +1418,7 @@ class _CustomerDetail extends StatelessWidget {
     final id = customer['id'].toString();
 
     Future<void> edit() async {
-      final changed = await showDialog<bool>(
+      final changed = await showPomgtDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => CustomerFormDialog(original: customer),
@@ -1343,14 +1432,13 @@ class _CustomerDetail extends StatelessWidget {
       child: Column(
         children: [
           DetailHeader(
-            icon: Icons.business_outlined,
+            icon: LucideIcons.building2,
             title: customer['trade_name']?.toString().trim().isNotEmpty == true
                 ? customer['trade_name'].toString()
                 : customer['legal_name'].toString(),
             subtitle:
                 '${customer['customer_code']} · ${customer['legal_name']}${customer['tax_id'] == null ? '' : ' · ${customer['tax_id']}'}',
-            help:
-                'Ficha maestra del cliente. Los pedidos históricos conservan copias de direcciones y requisitos para no cambiar retroactivamente.',
+            help: 'Ficha maestra del cliente. Los pedidos históricos conservan copias de direcciones y requisitos para no cambiar retroactivamente.',
             onEdit: edit,
           ),
           Expanded(
@@ -1359,13 +1447,13 @@ class _CustomerDetail extends StatelessWidget {
                 DetailSection(
                   label: 'Resumen',
                   help: 'Datos fiscales y comerciales principales.',
-                  icon: Icons.dashboard_outlined,
+                  icon: LucideIcons.layoutDashboard,
                   child: _CustomerSummary(customer: customer),
                 ),
                 DetailSection(
                   label: 'Direcciones',
                   help: 'Facturación, envío, plantas y oficinas.',
-                  icon: Icons.location_on_outlined,
+                  icon: LucideIcons.mapPin,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -1374,15 +1462,14 @@ class _CustomerDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'customer_id': id},
                       title: 'Direcciones',
-                      description:
-                          'Registra direcciones de facturación, envío, plantas y oficinas. El país se selecciona como México o Estados Unidos y se guarda internamente como MX o US.',
+                      description: 'Registra direcciones de facturación, envío, plantas y oficinas. El país se selecciona como México o Estados Unidos y se guarda internamente como MX o US.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Contactos',
                   help: 'Personas y medios de comunicación.',
-                  icon: Icons.groups_outlined,
+                  icon: LucideIcons.users,
                   child: _CustomerContacts(
                     customerId: id,
                     repository: repository,
@@ -1391,8 +1478,8 @@ class _CustomerDetail extends StatelessWidget {
                 ),
                 DetailSection(
                   label: 'Productos',
-                  help: 'SKUs y revisiones que compra el cliente.',
-                  icon: Icons.inventory_2_outlined,
+                  help: 'SKUs y versiones que compra el cliente.',
+                  icon: LucideIcons.package,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -1401,15 +1488,14 @@ class _CustomerDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'customer_id': id},
                       title: 'Productos que compra',
-                      description:
-                          'Relaciona productos del catálogo con el SKU, nombre y revisión que utiliza este cliente.',
+                      description: 'Relaciona productos del catálogo con el SKU, nombre y versión que utiliza este cliente.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Requisitos',
                   help: 'Especificaciones, empaque y calidad.',
-                  icon: Icons.rule_folder_outlined,
+                  icon: LucideIcons.folderCheck,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -1418,15 +1504,14 @@ class _CustomerDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'customer_id': id},
                       title: 'Requisitos productivos',
-                      description:
-                          'Especificaciones particulares, procesos especiales, instrucciones, tolerancias, requisitos de calidad y empaque.',
+                      description: 'Especificaciones particulares, procesos especiales, instrucciones, tolerancias, requisitos de calidad y empaque.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Diseños',
                   help: 'Aprobaciones y evidencia documentada.',
-                  icon: Icons.approval_outlined,
+                  icon: LucideIcons.stamp,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: EntityCrudPanel(
@@ -1435,21 +1520,19 @@ class _CustomerDetail extends StatelessWidget {
                       lookups: lookups,
                       fixedValues: {'customer_id': id},
                       title: 'Diseños aprobados',
-                      description:
-                          'Registra la aprobación de diseños y fija la versión documental correspondiente para conservar evidencia histórica.',
+                      description: 'Registra la aprobación de diseños y fija la versión documental correspondiente para conservar evidencia histórica.',
                     ),
                   ),
                 ),
                 DetailSection(
                   label: 'Documentos',
                   help: 'Contratos, constancias y archivos del cliente.',
-                  icon: Icons.folder_copy_outlined,
+                  icon: LucideIcons.folders,
                   child: LinkedDocumentsPanel(
                     entityField: 'customer_id',
                     entityId: id,
                     title: 'Documentos del cliente',
-                    help:
-                        'Carga y previsualiza constancia fiscal, contratos, especificaciones, diseños u otros archivos. Cada archivo queda versionado en el repositorio documental.',
+                    help: 'Carga y previsualiza constancia fiscal, contratos, especificaciones, diseños u otros archivos. Cada archivo queda versionado en el repositorio documental.',
                     documentTypes: const [
                       'Constancia fiscal',
                       'Contrato',
@@ -1464,13 +1547,13 @@ class _CustomerDetail extends StatelessWidget {
                 DetailSection(
                   label: 'Historial',
                   help: 'Pedidos, entregas y volumen producido.',
-                  icon: Icons.timeline_outlined,
+                  icon: LucideIcons.workflow,
                   child: _CustomerHistory(customerId: id),
                 ),
                 DetailSection(
                   label: 'Calidad',
                   help: 'Reclamaciones y no conformidades.',
-                  icon: Icons.verified_outlined,
+                  icon: LucideIcons.badgeCheck,
                   child: _CustomerQuality(
                     customerId: id,
                     repository: repository,
@@ -1534,69 +1617,73 @@ class _CustomerSummary extends StatelessWidget {
             customer['is_active'] == true ? 'Activo' : 'Inactivo',
           ),
         ];
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Información general',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(width: 7),
-                  const InfoTip(
-                    'Datos fiscales y comerciales usados como valores predeterminados al crear pedidos.',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              LayoutBuilder(
-                builder: (context, c) {
-                  final cols = c.maxWidth >= 900
-                      ? 4
-                      : (c.maxWidth >= 560 ? 2 : 1);
-                  final width = (c.maxWidth - (cols - 1) * 26) / cols;
-                  return Wrap(
-                    spacing: 26,
-                    runSpacing: 20,
-                    children: pairs
-                        .map(
-                          (p) => SizedBox(
-                            width: width,
-                            child: _KeyValue(label: p.key, value: p.value),
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-              ),
-              if (customer['notes'] != null &&
-                  customer['notes'].toString().trim().isNotEmpty) ...[
-                const SizedBox(height: 34),
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 Row(
                   children: [
                     Text(
-                      'Notas',
-                      style: Theme.of(context).textTheme.titleMedium,
+                      'Información general',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 7),
                     const InfoTip(
-                      'Contexto comercial o administrativo que no forma parte de una especificación productiva.',
+                      'Datos fiscales y comerciales usados como valores predeterminados al crear pedidos.',
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  customer['notes'].toString(),
-                  style: const TextStyle(
-                    color: PomgtColors.secondaryInk,
-                    height: 1.5,
-                  ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final cols = c.maxWidth >= 900
+                        ? 4
+                        : (c.maxWidth >= 560 ? 2 : 1);
+                    final width = (c.maxWidth - (cols - 1) * 26) / cols;
+                    return Wrap(
+                      spacing: 26,
+                      runSpacing: 20,
+                      children: pairs
+                          .map(
+                            (p) => SizedBox(
+                              width: width,
+                              child: _KeyValue(label: p.key, value: p.value),
+                            ),
+                          )
+                          .toList(),
+                    );
+                  },
                 ),
+                if (customer['notes'] != null &&
+                    customer['notes'].toString().trim().isNotEmpty) ...[
+                  const SizedBox(height: 34),
+                  Row(
+                    children: [
+                      Text(
+                        'Notas',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(width: 6),
+                      const InfoTip(
+                        'Contexto comercial o administrativo que no forma parte de una especificación productiva.',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    customer['notes'].toString(),
+                    style: const TextStyle(
+                      color: PomgtColors.secondaryInk,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },
@@ -1616,7 +1703,7 @@ class _CustomerContacts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
+    return PomgtTabController(
       length: 2,
       child: Column(
         children: [
@@ -1634,8 +1721,7 @@ class _CustomerContacts extends StatelessWidget {
                 ),
                 HelpTab(
                   label: 'Correos y teléfonos',
-                  help:
-                      'Medios de contacto asociados a cada persona, con datos principales y WhatsApp.',
+                  help: 'Medios de contacto asociados a cada persona, con datos principales y WhatsApp.',
                 ),
               ],
             ),
@@ -1651,14 +1737,12 @@ class _CustomerContacts extends StatelessWidget {
                     lookups: lookups,
                     fixedValues: {'customer_id': customerId},
                     title: 'Contactos',
-                    description:
-                        'Personas de contacto, puesto, departamento, idioma y preferencias de notificación.',
+                    description: 'Personas de contacto, puesto, departamento, idioma y preferencias de notificación.',
                   ),
                 ),
                 NestedRelationPanel(
                   title: 'Medios de contacto',
-                  help:
-                      'Selecciona una persona y administra sus correos y teléfonos. Puedes marcar un medio principal.',
+                  help: 'Selecciona una persona y administra sus correos y teléfonos. Puedes marcar un medio principal.',
                   parentTable: 'customer_contacts',
                   parentFilter: {'customer_id': customerId},
                   repository: repository,
@@ -1674,8 +1758,7 @@ class _CustomerContacts extends StatelessWidget {
                       table: 'customer_contact_phones',
                       label: 'Teléfonos',
                       foreignKey: 'contact_id',
-                      help:
-                          'Teléfonos, extensión, móvil, WhatsApp y teléfono principal.',
+                      help: 'Teléfonos, extensión, móvil, WhatsApp y teléfono principal.',
                     ),
                   ],
                 ),
@@ -1699,7 +1782,7 @@ class _CustomerHistory extends StatelessWidget {
       future: _load(repo),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+          return const PomgtLoading();
         if (snapshot.hasError)
           return Center(
             child: Text(
@@ -1717,101 +1800,105 @@ class _CustomerHistory extends StatelessWidget {
             : summaryRows.first;
         final volume = data['volume'] as List<Map<String, dynamic>>;
         final bundle = data['bundle'] as Map<String, dynamic>;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Historial',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(width: 7),
-                  const InfoTip(
-                    'Concentra pedidos, OP, entregas, reclamaciones, no conformidades y volumen producido.',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _Metric(
-                    label: 'Pedidos',
-                    value: '${summary['total_orders'] ?? 0}',
-                  ),
-                  _Metric(
-                    label: 'Órdenes de producción',
-                    value: '${summary['total_production_orders'] ?? 0}',
-                  ),
-                  _Metric(
-                    label: 'Entregas',
-                    value: '${summary['total_deliveries'] ?? 0}',
-                  ),
-                  _Metric(
-                    label: 'Reclamaciones',
-                    value: '${summary['total_claims'] ?? 0}',
-                  ),
-                  _Metric(
-                    label: 'No conformidades',
-                    value: '${summary['total_nonconformities'] ?? 0}',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 30),
-              _HistoryList(
-                title: 'Pedidos recientes',
-                rows: bundle['orders'] as List<Map<String, dynamic>>,
-                primary: 'order_number',
-                secondary: 'status',
-              ),
-              const SizedBox(height: 22),
-              _HistoryList(
-                title: 'Entregas',
-                rows: bundle['deliveries'] as List<Map<String, dynamic>>,
-                primary: 'delivery_number',
-                secondary: 'status',
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'Volumen producido',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Se mantiene separado por producto y unidad para no mezclar cantidades incompatibles.',
-                style: TextStyle(color: PomgtColors.muted, fontSize: 12.5),
-              ),
-              const SizedBox(height: 10),
-              if (volume.isEmpty)
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Historial',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(width: 7),
+                    const InfoTip(
+                      'Concentra pedidos, OP, entregas, reclamaciones, no conformidades y volumen producido.',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _Metric(
+                      label: 'Pedidos',
+                      value: '${summary['total_orders'] ?? 0}',
+                    ),
+                    _Metric(
+                      label: 'Órdenes de producción',
+                      value: '${summary['total_production_orders'] ?? 0}',
+                    ),
+                    _Metric(
+                      label: 'Entregas',
+                      value: '${summary['total_deliveries'] ?? 0}',
+                    ),
+                    _Metric(
+                      label: 'Reclamaciones',
+                      value: '${summary['total_claims'] ?? 0}',
+                    ),
+                    _Metric(
+                      label: 'No conformidades',
+                      value: '${summary['total_nonconformities'] ?? 0}',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 30),
+                _HistoryList(
+                  title: 'Pedidos recientes',
+                  rows: bundle['orders'] as List<Map<String, dynamic>>,
+                  primary: 'order_number',
+                  secondary: 'status',
+                ),
+                const SizedBox(height: 22),
+                _HistoryList(
+                  title: 'Entregas',
+                  rows: bundle['deliveries'] as List<Map<String, dynamic>>,
+                  primary: 'delivery_number',
+                  secondary: 'status',
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  'Volumen producido',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
                 const Text(
-                  'Sin producción terminada todavía.',
-                  style: TextStyle(color: PomgtColors.muted),
-                )
-              else
-                ...volume.map(
-                  (r) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 7),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            r['product_name']?.toString() ??
-                                'Producto sin identificar',
+                  'Se mantiene separado por producto y unidad para no mezclar cantidades incompatibles.',
+                  style: TextStyle(color: PomgtColors.muted, fontSize: 12.5),
+                ),
+                const SizedBox(height: 10),
+                if (volume.isEmpty)
+                  const Text(
+                    'Sin producción terminada todavía.',
+                    style: TextStyle(color: PomgtColors.muted),
+                  )
+                else
+                  ...volume.map(
+                    (r) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              r['product_name']?.toString() ??
+                                  'Producto sin identificar',
+                            ),
                           ),
-                        ),
-                        Text(
-                          '${r['completed_quantity']} · ${r['uom_symbol'] ?? 'unidad'}',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ],
+                          Text(
+                            '${r['completed_quantity']} · ${r['uom_symbol'] ?? 'unidad'}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -1843,7 +1930,7 @@ class _CustomerQuality extends StatelessWidget {
   final LookupRepository lookups;
 
   @override
-  Widget build(BuildContext context) => DefaultTabController(
+  Widget build(BuildContext context) => PomgtTabController(
     length: 2,
     child: Column(
       children: [
@@ -1857,13 +1944,11 @@ class _CustomerQuality extends StatelessWidget {
             tabs: [
               HelpTab(
                 label: 'Reclamaciones',
-                help:
-                    'Reclamaciones formales recibidas del cliente y su seguimiento.',
+                help: 'Reclamaciones formales recibidas del cliente y su seguimiento.',
               ),
               HelpTab(
                 label: 'No conformidades',
-                help:
-                    'Problemas de calidad, disposición, causa y acciones correctivas relacionadas con el cliente.',
+                help: 'Problemas de calidad, disposición, causa y acciones correctivas relacionadas con el cliente.',
               ),
             ],
           ),
@@ -1879,8 +1964,7 @@ class _CustomerQuality extends StatelessWidget {
                   lookups: lookups,
                   fixedValues: {'customer_id': customerId},
                   title: 'Reclamaciones',
-                  description:
-                      'Reclamaciones formales del cliente y seguimiento de su resolución.',
+                  description: 'Reclamaciones formales del cliente y seguimiento de su resolución.',
                 ),
               ),
               Padding(
@@ -1891,8 +1975,7 @@ class _CustomerQuality extends StatelessWidget {
                   lookups: lookups,
                   fixedValues: {'customer_id': customerId},
                   title: 'No conformidades',
-                  description:
-                      'Problemas de calidad, contención, causa raíz, acción correctiva y disposición.',
+                  description: 'Problemas de calidad, contención, causa raíz, acción correctiva y disposición.',
                 ),
               ),
             ],

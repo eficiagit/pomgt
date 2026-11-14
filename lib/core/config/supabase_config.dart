@@ -10,8 +10,7 @@ class SupabaseConfig {
   // Supabase service_role key in this Flutter application.
   static const publishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxcnpheWdscmt4ZmFjc3dhaWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NzE0MzIsImV4cCI6MjEwNDU0NzQzMn0.99N9aYH9kXbnInb7yxm_OC8kh9jXNfNXnh5oB75t3Tg',
+    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxcnpheWdscmt4ZmFjc3dhaWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NzE0MzIsImV4cCI6MjEwNDU0NzQzMn0.99N9aYH9kXbnInb7yxm_OC8kh9jXNfNXnh5oB75t3Tg',
   );
 
   static const databaseSchema = 'pomgt';

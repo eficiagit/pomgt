@@ -1,9 +1,16 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+import '../../core/widgets/scroll_to_top.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/error_copy.dart';
+import '../../core/widgets/categorized_picker.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
@@ -147,12 +154,7 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
             future: _future,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const SizedBox(
-                  height: 320,
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                );
+                return const SizedBox(height: 320, child: PomgtLoading());
               }
               if (snapshot.hasError) {
                 return SizedBox(
@@ -171,21 +173,19 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      crossAxisAlignment: WrapCrossAlignment.start,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(top: 2),
                           child: Icon(
-                            CupertinoIcons.building_2_fill,
+                            LucideIcons.building2,
                             size: 25,
                             color: PomgtColors.ink,
                           ),
                         ),
-                        SizedBox(
-                          width: compact ? screen.width - 92 : 720,
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -194,21 +194,13 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                                 runSpacing: 6,
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
-                                  ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxWidth: compact
-                                          ? screen.width - 122
-                                          : 620,
-                                    ),
-                                    child: Text(
-                                      _editing
-                                          ? 'Editar cliente'
-                                          : 'Nuevo cliente',
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.headlineSmall,
-                                    ),
+                                  Text(
+                                    _editing
+                                        ? 'Editar cliente'
+                                        : 'Nuevo cliente',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineSmall,
                                   ),
                                   const InfoTip(
                                     'Crea la ficha maestra del cliente. El código de cliente se genera automáticamente y nunca necesitas capturar identificadores internos.',
@@ -234,246 +226,250 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                           onPressed: _saving
                               ? null
                               : () => Navigator.pop(context),
-                          icon: const Icon(CupertinoIcons.xmark, size: 20),
+                          icon: const Icon(LucideIcons.x, size: 20),
                         ),
                       ],
                     ),
                     const Divider(height: 30),
                     Flexible(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _section(
-                              context,
-                              title: 'Información fiscal',
-                              help:
-                                  'Datos utilizados para identificar fiscalmente al cliente. México y Estados Unidos se guardan internamente como MX y US para cumplir con el formato de la base de datos.',
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final wide = constraints.maxWidth >= 680;
-                                  final fields = <Widget>[
-                                    TextFormField(
-                                      controller: _legalName,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Razón social *',
-                                      ),
-                                      validator: (value) =>
-                                          value == null || value.trim().isEmpty
-                                          ? 'Ingresa la razón social'
-                                          : null,
-                                    ),
-                                    TextFormField(
-                                      controller: _taxId,
-                                      decoration: const InputDecoration(
-                                        labelText:
-                                            'RFC / identificación fiscal',
-                                      ),
-                                    ),
-                                    DropdownButtonFormField<String>(
-                                      key: ValueKey(
-                                        'country-${_countryCode ?? ''}',
-                                      ),
-                                      initialValue:
-                                          const {
-                                            'MX',
-                                            'US',
-                                          }.contains(_countryCode)
-                                          ? _countryCode
-                                          : null,
-                                      decoration: const InputDecoration(
-                                        labelText: 'País fiscal',
-                                      ),
-                                      items: const [
-                                        DropdownMenuItem(
-                                          value: 'MX',
-                                          child: Text('México'),
+                      child: ScrollToTopArea(
+                        padding: const EdgeInsets.all(12),
+                        builder: (context, controller) => SingleChildScrollView(
+                          controller: controller,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _section(
+                                context,
+                                title: 'Información fiscal',
+                                help: 'Datos utilizados para identificar fiscalmente al cliente. México y Estados Unidos se guardan internamente como MX y US para cumplir con el formato de la base de datos.',
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final wide = constraints.maxWidth >= 680;
+                                    final fields = <Widget>[
+                                      TextFormField(
+                                        errorBuilder: pomgtValidationMessage,
+                                        controller: _legalName,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Razón social *',
+                                          hintText: 'Ej. Comercializadora ACME S.A. de C.V.',
                                         ),
-                                        DropdownMenuItem(
-                                          value: 'US',
-                                          child: Text('Estados Unidos'),
+                                        validator: (value) =>
+                                            value == null ||
+                                                value.trim().isEmpty
+                                            ? 'Ingresa la razón social'
+                                            : null,
+                                      ),
+                                      TextFormField(
+                                        errorBuilder: pomgtValidationMessage,
+                                        controller: _taxId,
+                                        decoration: const InputDecoration(
+                                          labelText:
+                                              'RFC / identificación fiscal',
+                                          hintText: 'Ej. ACM010101AAA',
                                         ),
-                                      ],
-                                      onChanged: (value) =>
-                                          setState(() => _countryCode = value),
-                                    ),
-                                  ];
-                                  return _responsiveFields(
-                                    constraints.maxWidth,
-                                    fields,
-                                    wide: wide,
-                                  );
-                                },
+                                      ),
+                                      DropdownButtonFormField<String>(
+                                        errorBuilder: pomgtValidationMessage,
+                                        key: ValueKey(
+                                          'country-${_countryCode ?? ''}',
+                                        ),
+                                        initialValue:
+                                            const {
+                                              'MX',
+                                              'US',
+                                            }.contains(_countryCode)
+                                            ? _countryCode
+                                            : null,
+                                        decoration: const InputDecoration(
+                                          labelText: 'País fiscal',
+                                          hintText: 'Selecciona un país',
+                                        ),
+                                        items: const [
+                                          DropdownMenuItem(
+                                            value: 'MX',
+                                            child: Text('México'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'US',
+                                            child: Text('Estados Unidos'),
+                                          ),
+                                        ],
+                                        onChanged: (value) => setState(
+                                          () => _countryCode = value,
+                                        ),
+                                      ),
+                                    ];
+                                    return _responsiveFields(
+                                      constraints.maxWidth,
+                                      fields,
+                                      wide: wide,
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 28),
-                            _section(
-                              context,
-                              title: 'Información comercial',
-                              help:
-                                  'Nombre que verá el equipo en el sistema, sitio web y datos generales de referencia.',
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final fields = <Widget>[
-                                    TextFormField(
-                                      controller: _tradeName,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Nombre comercial',
+                              const SizedBox(height: 28),
+                              _section(
+                                context,
+                                title: 'Información comercial',
+                                help: 'Nombre que verá el equipo en el sistema, sitio web y datos generales de referencia.',
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final fields = <Widget>[
+                                      TextFormField(
+                                        errorBuilder: pomgtValidationMessage,
+                                        controller: _tradeName,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Nombre comercial',
+                                          hintText: 'Ej. ACME',
+                                        ),
                                       ),
-                                    ),
-                                    TextFormField(
-                                      controller: _website,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Sitio web',
-                                        hintText: 'https://empresa.com',
+                                      TextFormField(
+                                        errorBuilder: pomgtValidationMessage,
+                                        controller: _website,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Sitio web',
+                                          hintText: 'https://empresa.com',
+                                        ),
+                                        validator: (value) {
+                                          final text = value?.trim() ?? '';
+                                          if (text.isEmpty) return null;
+                                          final uri = Uri.tryParse(text);
+                                          return uri == null ||
+                                                  (!uri.hasScheme &&
+                                                      !text.contains('.'))
+                                              ? 'Ingresa un sitio web válido'
+                                              : null;
+                                        },
                                       ),
-                                      validator: (value) {
-                                        final text = value?.trim() ?? '';
-                                        if (text.isEmpty) return null;
-                                        final uri = Uri.tryParse(text);
-                                        return uri == null ||
-                                                (!uri.hasScheme &&
-                                                    !text.contains('.'))
-                                            ? 'Ingresa un sitio web válido'
-                                            : null;
-                                      },
-                                    ),
-                                  ];
-                                  return _responsiveFields(
-                                    constraints.maxWidth,
-                                    fields,
-                                    wide: constraints.maxWidth >= 680,
-                                  );
-                                },
+                                    ];
+                                    return _responsiveFields(
+                                      constraints.maxWidth,
+                                      fields,
+                                      wide: constraints.maxWidth >= 680,
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 28),
-                            _section(
-                              context,
-                              title: 'Condiciones predeterminadas',
-                              help:
-                                  'Estos valores se propondrán automáticamente al crear pedidos para el cliente y podrán cambiarse en cada pedido.',
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final fields = <Widget>[
-                                    DropdownButtonFormField<String>(
-                                      key: ValueKey(
-                                        'currency-${_currencyCode ?? ''}',
-                                      ),
-                                      initialValue:
-                                          _currencies.any(
-                                            (row) =>
-                                                row['code']?.toString() ==
-                                                _currencyCode,
-                                          )
-                                          ? _currencyCode
-                                          : null,
-                                      isExpanded: true,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Moneda predeterminada *',
-                                      ),
-                                      items: _currencies
-                                          .map(
-                                            (row) => DropdownMenuItem<String>(
-                                              value: row['code']?.toString(),
-                                              child: Text(
-                                                _lookups.display(
-                                                  Phase1Schema
-                                                      .tables['currencies']!,
-                                                  row,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
+                              const SizedBox(height: 28),
+                              _section(
+                                context,
+                                title: 'Condiciones predeterminadas',
+                                help: 'Estos valores se propondrán automáticamente al crear pedidos para el cliente y podrán cambiarse en cada pedido.',
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final fields = <Widget>[
+                                      CategorizedSearchPicker(
+                                        key: ValueKey(
+                                          'currency-${_currencyCode ?? ''}',
+                                        ),
+                                        label: 'Moneda predeterminada *',
+                                        hint: 'Buscar moneda…',
+                                        value:
+                                            _currencies.any(
+                                              (row) =>
+                                                  row['code']?.toString() ==
+                                                  _currencyCode,
+                                            )
+                                            ? _currencyCode
+                                            : null,
+                                        items: [
+                                          for (final row in _currencies)
+                                            PickerItem(
+                                              id: row['code'].toString(),
+                                              label: _lookups.display(
+                                                Phase1Schema
+                                                    .tables['currencies']!,
+                                                row,
                                               ),
+                                              category: 'Monedas',
                                             ),
-                                          )
-                                          .toList(),
-                                      onChanged: (value) =>
-                                          setState(() => _currencyCode = value),
-                                      validator: (value) => value == null
-                                          ? 'Selecciona una moneda'
-                                          : null,
-                                    ),
-                                    DropdownButtonFormField<String>(
-                                      key: ValueKey(
-                                        'term-${_paymentTermId ?? ''}',
+                                        ],
+                                        onChanged: (value) => setState(
+                                          () => _currencyCode = value,
+                                        ),
+                                        validator: (value) => value == null
+                                            ? 'Selecciona una moneda'
+                                            : null,
                                       ),
-                                      initialValue:
-                                          _paymentTerms.any(
-                                            (row) =>
-                                                row['id']?.toString() ==
-                                                _paymentTermId,
-                                          )
-                                          ? _paymentTermId
-                                          : null,
-                                      isExpanded: true,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Condición de pago',
-                                      ),
-                                      items: _paymentTerms
-                                          .map(
-                                            (row) => DropdownMenuItem<String>(
-                                              value: row['id']?.toString(),
-                                              child: Text(
-                                                _lookups.display(
-                                                  Phase1Schema
-                                                      .tables['payment_terms']!,
-                                                  row,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
+                                      CategorizedSearchPicker(
+                                        key: ValueKey(
+                                          'term-${_paymentTermId ?? ''}',
+                                        ),
+                                        label: 'Condición de pago',
+                                        hint: 'Buscar condición…',
+                                        value:
+                                            _paymentTerms.any(
+                                              (row) =>
+                                                  row['id']?.toString() ==
+                                                  _paymentTermId,
+                                            )
+                                            ? _paymentTermId
+                                            : null,
+                                        items: [
+                                          for (final row in _paymentTerms)
+                                            PickerItem(
+                                              id: row['id'].toString(),
+                                              label: _lookups.display(
+                                                Phase1Schema
+                                                    .tables['payment_terms']!,
+                                                row,
                                               ),
+                                              category: 'Condiciones de pago',
                                             ),
-                                          )
-                                          .toList(),
-                                      onChanged: (value) => setState(
-                                        () => _paymentTermId = value,
+                                        ],
+                                        onChanged: (value) => setState(
+                                          () => _paymentTermId = value,
+                                        ),
+                                      ),
+                                    ];
+                                    return _responsiveFields(
+                                      constraints.maxWidth,
+                                      fields,
+                                      wide: constraints.maxWidth >= 680,
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 28),
+                              _section(
+                                context,
+                                title: 'Notas y estado',
+                                help: 'Las notas son contexto administrativo general. Desactivar un cliente lo conserva en el historial pero permite retirarlo de flujos nuevos cuando la interfaz aplique filtros de activos.',
+                                child: Column(
+                                  children: [
+                                    TextFormField(
+                                      errorBuilder: pomgtValidationMessage,
+                                      controller: _notes,
+                                      minLines: 2,
+                                      maxLines: 5,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Notas',
+                                        hintText: 'Notas internas sobre este cliente…',
                                       ),
                                     ),
-                                  ];
-                                  return _responsiveFields(
-                                    constraints.maxWidth,
-                                    fields,
-                                    wide: constraints.maxWidth >= 680,
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(height: 28),
-                            _section(
-                              context,
-                              title: 'Notas y estado',
-                              help:
-                                  'Las notas son contexto administrativo general. Desactivar un cliente lo conserva en el historial pero permite retirarlo de flujos nuevos cuando la interfaz aplique filtros de activos.',
-                              child: Column(
-                                children: [
-                                  TextFormField(
-                                    controller: _notes,
-                                    minLines: 2,
-                                    maxLines: 5,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Notas',
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  SwitchListTile.adaptive(
-                                    contentPadding: EdgeInsets.zero,
-                                    dense: true,
-                                    title: const Text(
-                                      'Cliente activo',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
+                                    const SizedBox(height: 10),
+                                    SwitchListTile.adaptive(
+                                      contentPadding: EdgeInsets.zero,
+                                      dense: true,
+                                      title: const Text(
+                                        'Cliente activo',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
+                                      subtitle: const Text(
+                                        'Mantén activo al cliente mientras pueda utilizarse en nuevas operaciones.',
+                                      ),
+                                      value: _isActive,
+                                      onChanged: (value) =>
+                                          setState(() => _isActive = value),
                                     ),
-                                    subtitle: const Text(
-                                      'Mantén activo al cliente mientras pueda utilizarse en nuevas operaciones.',
-                                    ),
-                                    value: _isActive,
-                                    onChanged: (value) =>
-                                        setState(() => _isActive = value),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -483,7 +479,7 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Icon(
-                            Icons.error_outline_rounded,
+                            LucideIcons.circleAlert,
                             size: 18,
                             color: PomgtColors.danger,
                           ),
@@ -525,8 +521,8 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
                                 )
                               : Icon(
                                   _editing
-                                      ? Icons.save_outlined
-                                      : Icons.add_rounded,
+                                      ? LucideIcons.save
+                                      : LucideIcons.plus,
                                   size: 16,
                                 ),
                           label: Text(
@@ -560,7 +556,12 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
       children: [
         Row(
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            Flexible(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
             const SizedBox(width: 7),
             InfoTip(help, size: 15),
           ],

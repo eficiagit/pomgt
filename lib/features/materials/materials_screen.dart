@@ -1,18 +1,33 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/app_notice.dart';
+import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/widgets/number_input.dart';
+import '../../core/widgets/categorized_picker.dart';
+import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/entity_crud_panel.dart';
 import '../../core/widgets/info_tip.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../core/widgets/linked_documents_panel.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import '../../data/repositories/material_repository.dart';
+import '../../data/repositories/product_repository.dart';
 import 'dynamic_material_attributes.dart';
+import 'import/material_import_dialog.dart';
+import '../../core/widgets/section_title.dart';
 
 class MaterialsScreen extends StatefulWidget {
   const MaterialsScreen({super.key});
@@ -56,6 +71,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       repo.categories(),
       lookups.rows('units_of_measure'),
       lookups.rows('currencies'),
+      lookups.rows('customers'),
     ]);
     return _MaterialIndexData(
       materials: results[0].where(_isMaterialCatalogRow).toList(),
@@ -63,6 +79,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
       categories: results[2],
       units: results[3],
       currencies: results[4],
+      customers: results[5],
     );
   }
 
@@ -74,7 +91,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   }
 
   Future<void> _create(_MaterialIndexData data) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _MaterialFormDialog(data: data),
@@ -91,11 +108,29 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
     }
   }
 
+  Future<void> _import() async {
+    final imported = await showPomgtDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const MaterialImportDialog(),
+    );
+    if (imported == true && mounted) {
+      context.read<LookupRepository>().invalidate('products');
+      context.read<RuntimeDataController>().tablesChanged({
+        'products',
+        'product_revisions',
+        'material_revision_attribute_values',
+      });
+      context.read<MaterialsController>().refresh();
+      _reload();
+    }
+  }
+
   Future<void> _edit(
     Map<String, dynamic> material,
     _MaterialIndexData data,
   ) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _MaterialFormDialog(data: data, material: material),
@@ -107,12 +142,20 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> material) async {
-    final confirmed = await showDialog<bool>(
+    final name = material['name']?.toString().trim().isNotEmpty == true
+        ? material['name'].toString()
+        : (material['sku']?.toString() ?? 'este material');
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Eliminar material'),
-        content: const Text(
-          'Esta acción no se puede deshacer. Los registros relacionados pueden impedir la eliminación para proteger la trazabilidad.',
+        title: pomgtDialogTitle(
+          context,
+          'Eliminar material',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text('Esta acción no se puede deshacer.'),
         ),
         actions: [
           TextButton(
@@ -121,24 +164,63 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar'),
+            child: const Text('Continuar'),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
+
+    final confirmedDetails = await showPomgtDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: pomgtDialogTitle(
+          context,
+          '¿Eliminar $name?',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: const Text(
+            'Se eliminarán también sus documentos ligados.\n\n'
+            'Si este material se usa como componente en la estructura de fabricación de un producto, no podrá eliminarse. Si solo está referenciado en un paso de una ruta de fabricación, se desvinculará de ese paso.\n\n'
+            'Si tiene órdenes de producción, líneas de pedido, entregas, reclamos o no conformidades registradas, no podrá eliminarse.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: PomgtColors.danger),
+            child: const Text('Eliminar definitivamente'),
+          ),
+        ],
+      ),
+    );
+    if (confirmedDetails != true || !mounted) return;
+
     try {
-      await context.read<GenericRepository>().deleteRow(
-        Phase1Schema.tables['products']!,
-        material,
+      await context.read<ProductRepository>().deleteProduct(
+        material['id'].toString(),
       );
       if (!mounted) return;
       setState(() => _selectedId = null);
       context.read<RuntimeDataController>().tablesChanged({'products'});
       _reload();
+      showPomgtSnackBar(context, 'Material eliminado.');
     } catch (error) {
       if (!mounted) return;
-      showPomgtSnackBar(context, error.toString(), isError: true);
+      showPomgtSnackBar(
+        context,
+        ErrorCopy.message(
+          error,
+          fallback: 'No fue posible eliminar el material.',
+        ),
+        isError: true,
+      );
     }
   }
 
@@ -179,7 +261,7 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _Header(onCreate: () => _create(data)),
+                  _Header(onCreate: () => _create(data), onImport: _import),
                   const SizedBox(height: 16),
                   Expanded(
                     child: narrow
@@ -224,13 +306,10 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
                               Expanded(
                                 child: selected == null
                                     ? const _Panel(
-                                        child: Center(
-                                          child: Text(
-                                            'Selecciona un material para ver su ficha.',
-                                            style: TextStyle(
-                                              color: PomgtColors.muted,
-                                            ),
-                                          ),
+                                        child: EmptyState(
+                                          icon: LucideIcons.layers,
+                                          title: 'Selecciona un material',
+                                          message: 'Su ficha y atributos aparecerán aquí.',
                                         ),
                                       )
                                     : _MaterialDetail(
@@ -282,13 +361,10 @@ class _MaterialsScreenState extends State<MaterialsScreen> {
                               Expanded(
                                 child: selected == null
                                     ? const _Panel(
-                                        child: Center(
-                                          child: Text(
-                                            'Selecciona un material para ver su ficha.',
-                                            style: TextStyle(
-                                              color: PomgtColors.muted,
-                                            ),
-                                          ),
+                                        child: EmptyState(
+                                          icon: LucideIcons.layers,
+                                          title: 'Selecciona un material',
+                                          message: 'Su ficha y atributos aparecerán aquí.',
                                         ),
                                       )
                                     : _MaterialDetail(
@@ -361,6 +437,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   String? _categoryId;
   String? _uomId;
   String? _currencyCode;
+  String? _customerId;
   bool _active = true;
   bool _saving = false;
   String? _error;
@@ -369,8 +446,32 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   Map<String, dynamic> _values = {};
   String? _activeRevisionId;
   List<Map<String, dynamic>> _existingValues = const [];
+  final List<Map<String, dynamic>> _extraTypes = [];
+  final List<Map<String, dynamic>> _extraCategories = [];
+  final List<Map<String, dynamic>> _extraCustomers = [];
+  final List<Map<String, dynamic>> _extraUnits = [];
 
   bool get editing => widget.material != null;
+
+  List<Map<String, dynamic>> get _types => [
+    ...widget.data.types,
+    ..._extraTypes,
+  ];
+  List<Map<String, dynamic>> get _categories => [
+    ...widget.data.categories,
+    ..._extraCategories,
+  ];
+  List<Map<String, dynamic>> get _customers => [
+    ...widget.data.customers,
+    ..._extraCustomers,
+  ];
+  List<Map<String, dynamic>> get _units => [
+    ...widget.data.units,
+    ..._extraUnits,
+  ];
+  Map<String, Map<String, dynamic>> get _typeById => {
+    for (final row in _types) row['id']?.toString() ?? '': row,
+  };
 
   @override
   void initState() {
@@ -380,11 +481,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       _sku.text = material['sku']?.toString() ?? '';
       _name.text = material['name']?.toString() ?? '';
       _description.text = material['description']?.toString() ?? '';
-      _cost.text = material['standard_cost']?.toString() ?? '';
+      _cost.text = formatNumberText(material['standard_cost']);
       _typeId = material['material_type_id']?.toString();
       _categoryId = material['material_category_id']?.toString();
       _uomId = material['base_uom_id']?.toString();
       _currencyCode = material['standard_cost_currency_code']?.toString();
+      _customerId = material['owner_customer_id']?.toString();
       _active = material['is_active'] == true;
     } else {
       _typeId = widget.data.types
@@ -395,9 +497,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                 widget.data.types.isEmpty ? null : widget.data.types.first,
           )?['id']
           ?.toString();
-      _uomId = widget.data.units.isEmpty
-          ? null
-          : widget.data.units.first['id']?.toString();
+      _uomId = _units.isEmpty ? null : _units.first['id']?.toString();
       _currencyCode = widget.data.currencies.isEmpty
           ? null
           : widget.data.currencies.first['code']?.toString();
@@ -473,7 +573,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     try {
       final repo = context.read<MaterialRepository>();
       final generic = context.read<GenericRepository>();
-      final type = widget.data.typeById[_typeId];
+      final type = _typeById[_typeId];
       if (editing) {
         await generic.updateRow(
           Phase1Schema.tables['products']!,
@@ -489,8 +589,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             'is_active': _active,
             'standard_cost': _cost.text.trim().isEmpty
                 ? null
-                : num.parse(_cost.text.trim()),
+                : parseNumberText(_cost.text),
             'standard_cost_currency_code': _currencyCode,
+            'owner_customer_id': _customerId,
+            'is_customer_specific': _customerId != null,
           },
         );
         if (_attributes.isNotEmpty) {
@@ -522,6 +624,8 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
             'is_active': _active,
             'standard_cost': _cost.text.trim(),
             'standard_cost_currency_code': _currencyCode,
+            'owner_customer_id': _customerId,
+            'is_customer_specific': _customerId != null,
           },
           attributeValues: materialAttributePayload(
             _attributes,
@@ -540,8 +644,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final typeName =
-        widget.data.typeById[_typeId]?['name']?.toString() ?? 'material';
+    final typeName = _typeById[_typeId]?['name']?.toString() ?? 'material';
     final screen = MediaQuery.sizeOf(context);
     final compact = screen.width < 640;
     return Dialog(
@@ -561,19 +664,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Icon(
-                    editing ? CupertinoIcons.pencil : CupertinoIcons.add,
+                    editing ? LucideIcons.pencil : LucideIcons.plus,
                     color: PomgtColors.ink,
                   ),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: compact ? screen.width - 92 : 780,
-                    ),
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Text(
                       editing ? 'Editar material' : 'Nuevo material',
                       overflow: TextOverflow.ellipsis,
@@ -583,7 +682,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                   IconButton(
                     tooltip: 'Cerrar',
                     onPressed: _saving ? null : () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: const Icon(LucideIcons.x),
                   ),
                 ],
               ),
@@ -591,94 +690,106 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               Expanded(
                 child: Form(
                   key: _formKey,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const _SectionTitle('INFORMACIÓN GENERAL'),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final wide = constraints.maxWidth >= 720;
-                            final fieldWidth = wide
-                                ? (constraints.maxWidth - 16) / 2
-                                : constraints.maxWidth;
-                            return Wrap(
-                              spacing: 16,
-                              runSpacing: 14,
-                              children: [
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _text(_sku, 'Código / SKU *'),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _text(_name, 'Nombre *'),
-                                ),
-                                SizedBox(
-                                  width: constraints.maxWidth,
-                                  child: _text(
-                                    _description,
-                                    'Descripción',
-                                    lines: 3,
-                                    required: false,
+                  child: ScrollToTopArea(
+                    padding: const EdgeInsets.all(12),
+                    builder: (context, controller) => SingleChildScrollView(
+                      controller: controller,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const _SectionTitle('INFORMACIÓN GENERAL'),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final wide = constraints.maxWidth >= 720;
+                              final fieldWidth = wide
+                                  ? (constraints.maxWidth - 16) / 2
+                                  : constraints.maxWidth;
+                              return Wrap(
+                                spacing: 16,
+                                runSpacing: 14,
+                                children: [
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _text(
+                                      _sku,
+                                      'Código / SKU *',
+                                      hint: 'Ej. MAT-0001',
+                                    ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _typeDropdown(),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _categoryDropdown(),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _uomDropdown(),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _currencyDropdown(),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: _text(
-                                    _cost,
-                                    'Costo estándar',
-                                    required: false,
-                                    number: true,
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _text(_name, 'Nombre *'),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: fieldWidth,
-                                  child: SwitchListTile.adaptive(
-                                    contentPadding: EdgeInsets.zero,
-                                    title: const Text('Activo'),
-                                    value: _active,
-                                    onChanged: (value) =>
-                                        setState(() => _active = value),
+                                  SizedBox(
+                                    width: constraints.maxWidth,
+                                    child: _text(
+                                      _description,
+                                      'Descripción',
+                                      lines: 3,
+                                      required: false,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 24),
-                        _SectionTitle('ESPECIFICACIONES · $typeName'),
-                        if (_attributes.isEmpty) ...[
-                          const Text(
-                            'Este tipo de material todavía no tiene especificaciones configuradas.',
-                            style: TextStyle(color: PomgtColors.muted),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _typeDropdown(),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _categoryDropdown(),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _customerDropdown(),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _uomDropdown(),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _currencyDropdown(),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: _text(
+                                      _cost,
+                                      'Costo estándar',
+                                      required: false,
+                                      number: true,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: SwitchListTile.adaptive(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text('Activo'),
+                                      value: _active,
+                                      onChanged: (value) =>
+                                          setState(() => _active = value),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
-                        ] else
-                          DynamicMaterialAttributeForm(
-                            attributes: _attributes,
-                            options: _options,
-                            values: _values,
-                            units: widget.data.unitById,
-                            onChanged: (values) =>
-                                setState(() => _values = values),
-                          ),
-                      ],
+                          const SizedBox(height: 24),
+                          _SectionTitle('ESPECIFICACIONES · $typeName'),
+                          if (_attributes.isEmpty) ...[
+                            const Text(
+                              'Este tipo de material todavía no tiene especificaciones configuradas.',
+                              style: TextStyle(color: PomgtColors.muted),
+                            ),
+                          ] else
+                            DynamicMaterialAttributeForm(
+                              attributes: _attributes,
+                              options: _options,
+                              values: _values,
+                              units: widget.data.unitById,
+                              onChanged: (values) =>
+                                  setState(() => _values = values),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -709,7 +820,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Icon(
-                            editing ? Icons.save_outlined : Icons.add_rounded,
+                            editing ? LucideIcons.save : LucideIcons.plus,
                             size: 17,
                           ),
                     label: Text(editing ? 'Guardar cambios' : 'Crear material'),
@@ -729,15 +840,25 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     int lines = 1,
     bool required = true,
     bool number = false,
+    String? hint,
   }) {
     return TextFormField(
+      errorBuilder: pomgtValidationMessage,
       controller: controller,
       minLines: lines,
       maxLines: lines,
       keyboardType: number
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.text,
-      decoration: InputDecoration(labelText: label),
+      inputFormatters: number ? const [ThousandsInputFormatter()] : null,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText:
+            hint ??
+            (number
+                ? 'Ej. 0'
+                : 'Escribe ${label.replaceAll('*', '').trim().toLowerCase()}'),
+      ),
       validator: (value) {
         if (required && (value == null || value.trim().isEmpty)) {
           return 'Campo requerido';
@@ -745,7 +866,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
         if (number &&
             value != null &&
             value.trim().isNotEmpty &&
-            num.tryParse(value.trim()) == null) {
+            parseNumberText(value) == null) {
           return 'Número inválido';
         }
         return null;
@@ -754,82 +875,136 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 
   Widget _typeDropdown() {
-    return DropdownButtonFormField<String>(
-      initialValue: _typeId,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Tipo de material *'),
-      items: widget.data.types
-          .map(
-            (row) => DropdownMenuItem<String>(
-              value: row['id']?.toString(),
-              child: Text(row['name']?.toString() ?? 'Tipo'),
+    return QuickCreateField(
+      table: 'material_types',
+      repository: context.read<GenericRepository>(),
+      lookups: context.read<LookupRepository>(),
+      isEmpty: _types.isEmpty,
+      onCreated: (row) => setState(() {
+        _extraTypes.add(row);
+        _typeId = row['id']?.toString();
+        _loadAttributes();
+      }),
+      child: CategorizedSearchPicker(
+        label: 'Tipo de material *',
+        hint: 'Buscar tipo…',
+        value: _typeId,
+        enabled: !editing,
+        items: [
+          for (final row in _types)
+            PickerItem(
+              id: row['id'].toString(),
+              label: row['name']?.toString() ?? 'Tipo',
+              category: 'Tipos de material',
             ),
-          )
-          .toList(),
-      onChanged: editing
-          ? null
-          : (value) {
-              setState(() => _typeId = value);
-              _loadAttributes();
-            },
-      validator: (value) => value == null ? 'Selecciona un tipo' : null,
+        ],
+        onChanged: (value) {
+          setState(() => _typeId = value);
+          _loadAttributes();
+        },
+        validator: (value) => value == null ? 'Selecciona un tipo' : null,
+      ),
     );
   }
 
   Widget _categoryDropdown() {
-    return DropdownButtonFormField<String>(
-      initialValue: _categoryId,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Categoría'),
-      items: [
-        const DropdownMenuItem<String>(
-          value: null,
-          child: Text('Sin categoría'),
-        ),
-        ...widget.data.categories.map(
-          (row) => DropdownMenuItem<String>(
-            value: row['id']?.toString(),
-            child: Text(row['name']?.toString() ?? 'Categoría'),
-          ),
-        ),
-      ],
-      onChanged: (value) => setState(() => _categoryId = value),
+    return QuickCreateField(
+      table: 'material_categories',
+      repository: context.read<GenericRepository>(),
+      lookups: context.read<LookupRepository>(),
+      isEmpty: _categories.isEmpty,
+      onCreated: (row) => setState(() {
+        _extraCategories.add(row);
+        _categoryId = row['id']?.toString();
+      }),
+      child: CategorizedSearchPicker(
+        label: 'Categoría',
+        hint: 'Buscar categoría…',
+        value: _categoryId,
+        items: [
+          for (final row in _categories)
+            PickerItem(
+              id: row['id'].toString(),
+              label: row['name']?.toString() ?? 'Categoría',
+              category: 'Categorías',
+            ),
+        ],
+        onChanged: (value) => setState(() => _categoryId = value),
+      ),
+    );
+  }
+
+  Widget _customerDropdown() {
+    return QuickCreateField(
+      table: 'customers',
+      repository: context.read<GenericRepository>(),
+      lookups: context.read<LookupRepository>(),
+      isEmpty: _customers.isEmpty,
+      onCreated: (row) => setState(() {
+        _extraCustomers.add(row);
+        _customerId = row['id']?.toString();
+      }),
+      child: CategorizedSearchPicker(
+        label: 'Cliente',
+        hint: 'Buscar cliente…',
+        value: _customerId,
+        items: [
+          for (final row in _customers)
+            PickerItem(
+              id: row['id'].toString(),
+              label:
+                  row['legal_name']?.toString() ??
+                  row['trade_name']?.toString() ??
+                  'Cliente',
+              category: 'Clientes',
+            ),
+        ],
+        onChanged: (value) => setState(() => _customerId = value),
+      ),
     );
   }
 
   Widget _uomDropdown() {
-    return DropdownButtonFormField<String>(
-      initialValue: _uomId,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Unidad base *'),
-      items: widget.data.units
-          .map(
-            (row) => DropdownMenuItem<String>(
-              value: row['id']?.toString(),
-              child: Text(
-                '${row['name'] ?? 'Unidad'} (${row['symbol'] ?? ''})',
-              ),
+    return QuickCreateField(
+      table: 'units_of_measure',
+      repository: context.read<GenericRepository>(),
+      lookups: context.read<LookupRepository>(),
+      isEmpty: _units.isEmpty,
+      onCreated: (row) => setState(() {
+        _extraUnits.add(row);
+        _uomId = row['id']?.toString();
+      }),
+      child: CategorizedSearchPicker(
+        label: 'Unidad base *',
+        hint: 'Buscar unidad…',
+        value: _uomId,
+        items: [
+          for (final row in _units)
+            PickerItem(
+              id: row['id'].toString(),
+              label: '${row['name'] ?? 'Unidad'} (${row['symbol'] ?? ''})',
+              category: 'Unidades',
             ),
-          )
-          .toList(),
-      onChanged: (value) => setState(() => _uomId = value),
-      validator: (value) => value == null ? 'Selecciona una unidad' : null,
+        ],
+        onChanged: (value) => setState(() => _uomId = value),
+        validator: (value) => value == null ? 'Selecciona una unidad' : null,
+      ),
     );
   }
 
   Widget _currencyDropdown() {
-    return DropdownButtonFormField<String>(
-      initialValue: _currencyCode,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Moneda'),
-      items: widget.data.currencies
-          .map(
-            (row) => DropdownMenuItem<String>(
-              value: row['code']?.toString(),
-              child: Text('${row['code'] ?? ''} · ${row['name'] ?? ''}'),
-            ),
-          )
-          .toList(),
+    return CategorizedSearchPicker(
+      label: 'Moneda',
+      hint: 'Buscar moneda…',
+      value: _currencyCode,
+      items: [
+        for (final row in widget.data.currencies)
+          PickerItem(
+            id: row['code'].toString(),
+            label: '${row['code'] ?? ''} · ${row['name'] ?? ''}',
+            category: 'Monedas',
+          ),
+      ],
       onChanged: (value) => setState(() => _currencyCode = value),
     );
   }
@@ -875,6 +1050,9 @@ class _MaterialDetailState extends State<_MaterialDetail> {
         .categoryById[widget.material['material_category_id']?.toString()];
     final unit =
         widget.data.unitById[widget.material['base_uom_id']?.toString()];
+    final customer = widget
+        .data
+        .customerById[widget.material['owner_customer_id']?.toString()];
     return FutureBuilder<Map<String, dynamic>>(
       future: _future,
       builder: (context, snapshot) {
@@ -907,7 +1085,7 @@ class _MaterialDetailState extends State<_MaterialDetail> {
                                   style: const TextStyle(
                                     color: PomgtColors.ink,
                                     fontSize: 22,
-                                    fontWeight: FontWeight.w900,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
@@ -931,17 +1109,17 @@ class _MaterialDetailState extends State<_MaterialDetail> {
                     ),
                     TextButton.icon(
                       onPressed: widget.onEdit,
-                      icon: const Icon(CupertinoIcons.pencil, size: 17),
+                      icon: const Icon(LucideIcons.pencil, size: 17),
                       label: const Text('Editar'),
                     ),
                     IconButton(
                       onPressed: widget.onDelete,
                       tooltip: 'Eliminar material',
-                      icon: const Icon(CupertinoIcons.trash, size: 18),
+                      icon: const Icon(LucideIcons.trash2, size: 18),
                     ),
                     TextButton.icon(
                       onPressed: null,
-                      icon: const Icon(CupertinoIcons.doc_on_doc, size: 17),
+                      icon: const Icon(LucideIcons.files, size: 17),
                       label: const Text('Duplicar'),
                     ),
                   ],
@@ -949,77 +1127,109 @@ class _MaterialDetailState extends State<_MaterialDetail> {
               ),
               const Divider(height: 1),
               if (snapshot.connectionState == ConnectionState.waiting)
-                const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
+                const Expanded(child: PomgtLoading())
               else
                 Expanded(
-                  child: DefaultTabController(
+                  child: PomgtTabController(
                     length: 4,
                     child: Column(
                       children: [
-                        const TabBar(
-                          isScrollable: true,
-                          tabAlignment: TabAlignment.start,
-                          tabs: [
-                            Tab(text: 'Resumen'),
-                            Tab(text: 'Especificaciones'),
-                            Tab(text: 'Usado en BOM'),
-                            Tab(text: 'Documentos'),
-                          ],
+                        Container(
+                          decoration: const BoxDecoration(
+                            color: PomgtColors.canvas,
+                            border: Border(
+                              bottom: BorderSide(color: PomgtColors.line),
+                            ),
+                          ),
+                          child: const TabBar(
+                            isScrollable: true,
+                            tabAlignment: TabAlignment.start,
+                            dividerColor: Colors.transparent,
+                            indicatorColor: PomgtColors.blue,
+                            indicatorSize: TabBarIndicatorSize.tab,
+                            labelColor: PomgtColors.ink,
+                            unselectedLabelColor: PomgtColors.muted,
+                            labelStyle: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13.5,
+                            ),
+                            tabs: [
+                              Tab(text: 'Resumen'),
+                              Tab(text: 'Especificaciones'),
+                              Tab(text: 'Usado en estructuras'),
+                              Tab(text: 'Documentos'),
+                            ],
+                          ),
                         ),
-                        const Divider(height: 1),
                         Expanded(
                           child: TabBarView(
                             children: [
-                              SingleChildScrollView(
-                                padding: const EdgeInsets.all(20),
-                                child: Wrap(
-                                  spacing: 28,
-                                  runSpacing: 18,
-                                  children: [
-                                    _Kv(
-                                      'Tipo',
-                                      type?['name']?.toString() ?? '—',
+                              ScrollToTopArea(
+                                padding: const EdgeInsets.all(12),
+                                builder: (context, controller) =>
+                                    SingleChildScrollView(
+                                      controller: controller,
+                                      padding: const EdgeInsets.all(20),
+                                      child: Wrap(
+                                        spacing: 28,
+                                        runSpacing: 18,
+                                        children: [
+                                          _Kv(
+                                            'Tipo',
+                                            type?['name']?.toString() ?? '—',
+                                          ),
+                                          _Kv(
+                                            'Categoría',
+                                            category?['name']?.toString() ??
+                                                '—',
+                                          ),
+                                          _Kv(
+                                            'Cliente',
+                                            customer?['legal_name']
+                                                    ?.toString() ??
+                                                '—',
+                                          ),
+                                          _Kv(
+                                            'Unidad',
+                                            unit?['symbol']?.toString() ?? '—',
+                                          ),
+                                          _Kv(
+                                            'Costo',
+                                            widget.material['standard_cost']
+                                                    ?.toString() ??
+                                                '—',
+                                          ),
+                                          _Kv(
+                                            'Estructuras de fabricación relacionadas',
+                                            bomItems.length.toString(),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    _Kv(
-                                      'Categoría',
-                                      category?['name']?.toString() ?? '—',
-                                    ),
-                                    _Kv(
-                                      'Unidad',
-                                      unit?['symbol']?.toString() ?? '—',
-                                    ),
-                                    _Kv(
-                                      'Costo',
-                                      widget.material['standard_cost']
-                                              ?.toString() ??
-                                          '—',
-                                    ),
-                                    _Kv(
-                                      'BOMs relacionados',
-                                      bomItems.length.toString(),
-                                    ),
-                                  ],
-                                ),
                               ),
-                              SingleChildScrollView(
-                                padding: const EdgeInsets.all(20),
-                                child: FutureBuilder<_SpecData>(
-                                  future: _specData(type?['id']?.toString()),
-                                  builder: (context, specSnapshot) {
-                                    final spec =
-                                        specSnapshot.data ?? _SpecData.empty();
-                                    return DynamicMaterialAttributeViewer(
-                                      attributes: spec.attributes,
-                                      values: values,
-                                      options: spec.options,
-                                      units: widget.data.unitById,
-                                    );
-                                  },
-                                ),
+                              ScrollToTopArea(
+                                padding: const EdgeInsets.all(12),
+                                builder: (context, controller) =>
+                                    SingleChildScrollView(
+                                      controller: controller,
+                                      padding: const EdgeInsets.all(20),
+                                      child: FutureBuilder<_SpecData>(
+                                        future: _specData(
+                                          type?['id']?.toString(),
+                                        ),
+                                        builder: (context, specSnapshot) {
+                                          final spec =
+                                              specSnapshot.data ??
+                                              _SpecData.empty();
+                                          return DynamicMaterialAttributeViewer(
+                                            attributes: spec.attributes,
+                                            values: values,
+                                            options: spec.options,
+                                            units: widget.data.unitById,
+                                          );
+                                        },
+                                      ),
+                                    ),
                               ),
                               _SimpleRows(
                                 rows: bomItems,
@@ -1030,8 +1240,7 @@ class _MaterialDetailState extends State<_MaterialDetail> {
                                 entityField: 'product_id',
                                 entityId: widget.material['id'].toString(),
                                 title: 'Documentos del material',
-                                help:
-                                    'Fichas técnicas, certificados, hojas de seguridad e imágenes.',
+                                help: 'Fichas técnicas, certificados, hojas de seguridad e imágenes.',
                               ),
                             ],
                           ),
@@ -1122,7 +1331,7 @@ class _MaterialList extends StatelessWidget {
                     onChanged: onSearch,
                     decoration: const InputDecoration(
                       hintText: 'Buscar materiales...',
-                      prefixIcon: Icon(CupertinoIcons.search, size: 20),
+                      prefixIcon: Icon(LucideIcons.search, size: 20),
                       prefixIconConstraints: BoxConstraints(minWidth: 46),
                       contentPadding: EdgeInsets.symmetric(
                         horizontal: 18,
@@ -1135,7 +1344,7 @@ class _MaterialList extends StatelessWidget {
               IconButton(
                 tooltip: 'Actualizar',
                 onPressed: onRefresh,
-                icon: const Icon(CupertinoIcons.refresh, size: 18),
+                icon: const Icon(LucideIcons.refreshCw, size: 18),
               ),
             ],
           ),
@@ -1184,6 +1393,7 @@ class _MaterialList extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: DropdownButtonFormField<bool?>(
+                  errorBuilder: pomgtValidationMessage,
                   initialValue: activeFilter,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Estado'),
@@ -1203,13 +1413,13 @@ class _MaterialList extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 8),
           Expanded(
             child: loading
-                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                ? const PomgtLoading()
                 : rows.isEmpty
                 ? const Center(
                     child: Text(
@@ -1217,39 +1427,38 @@ class _MaterialList extends StatelessWidget {
                       style: TextStyle(color: PomgtColors.muted),
                     ),
                   )
-                : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
-                      final id = row['id']?.toString();
-                      final selected = id == selectedId;
-                      final type =
-                          data.typeById[row['material_type_id']?.toString()];
-                      return InkWell(
-                        borderRadius: PomgtRadii.borderSm,
-                        onTap: () => onSelect(id),
-                        child: Container(
+                : ScrollToTopArea(
+                    padding: const EdgeInsets.all(10),
+                    builder: (context, controller) => PomgtListView.separated(
+                      controller: controller,
+                      padding: const EdgeInsets.only(bottom: 8),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final row = rows[index];
+                        final id = row['id']?.toString();
+                        final selected = id == selectedId;
+                        final type =
+                            data.typeById[row['material_type_id']?.toString()];
+                        return SmoothHover(
+                          selected: selected,
+                          selectedColor: PomgtColors.navySelected,
+                          hoverColor: PomgtColors.surfaceAlt.withValues(
+                            alpha: .55,
+                          ),
+                          borderColor: selected
+                              ? PomgtColors.navySelectedBorder
+                              : PomgtColors.line,
+                          lift: .2,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
                             vertical: 12,
                           ),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? PomgtColors.navySelected
-                                : PomgtColors.canvas,
-                            borderRadius: PomgtRadii.borderSm,
-                            border: Border.all(
-                              color: selected
-                                  ? PomgtColors.navySelectedBorder
-                                  : PomgtColors.line,
-                            ),
-                          ),
+                          onTap: () => onSelect(id),
                           child: Row(
                             children: [
                               Icon(
-                                CupertinoIcons.cube_box,
+                                LucideIcons.box,
                                 size: 21,
                                 color: selected
                                     ? PomgtColors.navy
@@ -1264,7 +1473,7 @@ class _MaterialList extends StatelessWidget {
                                       row['sku']?.toString() ?? 'MAT',
                                       style: const TextStyle(
                                         fontSize: 12,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                     const SizedBox(height: 3),
@@ -1274,12 +1483,20 @@ class _MaterialList extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         fontSize: 12.5,
-                                        fontWeight: FontWeight.w800,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                     const SizedBox(height: 3),
                                     Text(
-                                      '${type?['name'] ?? UiCopy.enumLabel(row['product_type']?.toString() ?? '')} · ${data.unitById[row['base_uom_id']?.toString()]?['symbol'] ?? '—'}',
+                                      [
+                                        '${type?['name'] ?? UiCopy.enumLabel(row['product_type']?.toString() ?? '')} · ${data.unitById[row['base_uom_id']?.toString()]?['symbol'] ?? '—'}',
+                                        if (row['owner_customer_id'] != null)
+                                          data
+                                                  .customerById[row['owner_customer_id']
+                                                      ?.toString()]?['legal_name']
+                                                  ?.toString() ??
+                                              'Cliente',
+                                      ].join(' · '),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -1291,6 +1508,7 @@ class _MaterialList extends StatelessWidget {
                                 ),
                               ),
                               PopupMenuButton<String>(
+                                popUpAnimationStyle: PomgtMotion.style(context),
                                 tooltip: 'Acciones',
                                 padding: EdgeInsets.zero,
                                 onSelected: (value) {
@@ -1302,7 +1520,7 @@ class _MaterialList extends StatelessWidget {
                                     value: 'edit',
                                     child: Row(
                                       children: [
-                                        Icon(CupertinoIcons.pencil, size: 17),
+                                        Icon(LucideIcons.pencil, size: 17),
                                         SizedBox(width: 9),
                                         Text('Editar'),
                                       ],
@@ -1313,7 +1531,7 @@ class _MaterialList extends StatelessWidget {
                                     child: Row(
                                       children: [
                                         Icon(
-                                          CupertinoIcons.trash,
+                                          LucideIcons.trash2,
                                           size: 17,
                                           color: PomgtColors.danger,
                                         ),
@@ -1331,7 +1549,7 @@ class _MaterialList extends StatelessWidget {
                                 child: const Padding(
                                   padding: EdgeInsets.all(8),
                                   child: Icon(
-                                    CupertinoIcons.ellipsis_vertical,
+                                    LucideIcons.ellipsisVertical,
                                     size: 17,
                                     color: PomgtColors.muted,
                                   ),
@@ -1339,9 +1557,9 @@ class _MaterialList extends StatelessWidget {
                               ),
                             ],
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -1356,6 +1574,7 @@ class _MaterialList extends StatelessWidget {
     ValueChanged<String?> onChanged,
   ) {
     return DropdownButtonFormField<String>(
+      errorBuilder: pomgtValidationMessage,
       initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(labelText: label),
@@ -1366,8 +1585,9 @@ class _MaterialList extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onCreate});
+  const _Header({required this.onCreate, required this.onImport});
   final VoidCallback onCreate;
+  final VoidCallback onImport;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -1376,12 +1596,8 @@ class _Header extends StatelessWidget {
       final titleBlock = Row(
         mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          Flexible(
-            child: Text(
-              'Materiales',
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
+          const Flexible(
+            child: SectionTitle('Materiales', icon: LucideIcons.layers),
           ),
           const SizedBox(width: 8),
           const InfoTip(
@@ -1390,9 +1606,14 @@ class _Header extends StatelessWidget {
           ),
         ],
       );
+      final importButton = OutlinedButton.icon(
+        onPressed: onImport,
+        icon: const Icon(LucideIcons.cloudUpload, size: 18),
+        label: const Text('Cargar desde archivo'),
+      );
       final button = FilledButton.icon(
         onPressed: onCreate,
-        icon: const Icon(CupertinoIcons.add, size: 18),
+        icon: const Icon(LucideIcons.plus, size: 18),
         label: const Text('Nuevo material'),
       );
 
@@ -1401,7 +1622,7 @@ class _Header extends StatelessWidget {
           spacing: 12,
           runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
-          children: [titleBlock, button],
+          children: [titleBlock, importButton, button],
         );
       }
 
@@ -1410,6 +1631,8 @@ class _Header extends StatelessWidget {
         children: [
           Expanded(child: titleBlock),
           const SizedBox(width: 18),
+          importButton,
+          const SizedBox(width: 10),
           button,
         ],
       );
@@ -1447,7 +1670,7 @@ class _SectionTitle extends StatelessWidget {
       style: const TextStyle(
         color: PomgtColors.muted,
         fontSize: 11.5,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w600,
       ),
     ),
   );
@@ -1458,20 +1681,23 @@ class _Status extends StatelessWidget {
   final bool active;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      _Dot(active: active),
-      const SizedBox(width: 6),
-      Text(
-        active ? 'Activo' : 'Inactivo',
-        style: TextStyle(
-          color: active ? PomgtColors.mint : PomgtColors.danger,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
+  Widget build(BuildContext context) => PomgtAnimatedValue(
+    value: active,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Dot(active: active),
+        const SizedBox(width: 6),
+        Text(
+          active ? 'Activo' : 'Inactivo',
+          style: TextStyle(
+            color: active ? PomgtColors.mint : PomgtColors.danger,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
@@ -1506,7 +1732,7 @@ class _Kv extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 11.5,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 5),
@@ -1514,7 +1740,7 @@ class _Kv extends StatelessWidget {
           value,
           style: const TextStyle(
             color: PomgtColors.ink,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
@@ -1539,18 +1765,22 @@ class _SimpleRows extends StatelessWidget {
         child: Text(empty, style: const TextStyle(color: PomgtColors.muted)),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(18),
-      itemCount: rows.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final row = rows[index];
-        return ListTile(
-          dense: true,
-          leading: const Icon(CupertinoIcons.doc_text, color: PomgtColors.blue),
-          title: Text(row[titleField]?.toString() ?? 'Registro'),
-        );
-      },
+    return ScrollToTopArea(
+      padding: const EdgeInsets.all(10),
+      builder: (context, controller) => PomgtListView.separated(
+        controller: controller,
+        padding: const EdgeInsets.all(18),
+        itemCount: rows.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final row = rows[index];
+          return ListTile(
+            dense: true,
+            leading: const Icon(LucideIcons.fileText, color: PomgtColors.blue),
+            title: Text(row[titleField]?.toString() ?? 'Registro'),
+          );
+        },
+      ),
     );
   }
 }
@@ -1562,6 +1792,7 @@ class _MaterialIndexData {
     required this.categories,
     required this.units,
     required this.currencies,
+    required this.customers,
   });
 
   final List<Map<String, dynamic>> materials;
@@ -1569,6 +1800,7 @@ class _MaterialIndexData {
   final List<Map<String, dynamic>> categories;
   final List<Map<String, dynamic>> units;
   final List<Map<String, dynamic>> currencies;
+  final List<Map<String, dynamic>> customers;
 
   factory _MaterialIndexData.empty() => const _MaterialIndexData(
     materials: [],
@@ -1576,6 +1808,7 @@ class _MaterialIndexData {
     categories: [],
     units: [],
     currencies: [],
+    customers: [],
   );
 
   Map<String, Map<String, dynamic>> get typeById => {
@@ -1586,6 +1819,9 @@ class _MaterialIndexData {
   };
   Map<String, Map<String, dynamic>> get unitById => {
     for (final row in units) row['id']?.toString() ?? '': row,
+  };
+  Map<String, Map<String, dynamic>> get customerById => {
+    for (final row in customers) row['id']?.toString() ?? '': row,
   };
 }
 

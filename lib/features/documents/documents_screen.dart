@@ -1,9 +1,17 @@
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+import '../../core/widgets/scroll_to_top.dart';
+
 import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/app_notice.dart';
@@ -23,12 +31,15 @@ class DocumentsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return RecordWorkspace(
       title: 'Documentos',
-      help:
-          'Repositorio documental versionado. Un documento puede tener múltiples versiones y vincularse a clientes, productos, revisiones, pedidos, estructuras de fabricación, rutas de fabricación, órdenes de producción, entregas y calidad.',
+      titleIcon: LucideIcons.folder,
+      help: 'Repositorio documental versionado. Un documento puede tener múltiples versiones y vincularse a clientes, productos, versiones, pedidos, estructuras de fabricación, rutas de fabricación, órdenes de producción, entregas y calidad.',
       masterTable: 'documents',
       controller: context.watch<DocumentsController>(),
       createLabel: 'Nuevo documento',
       detailBuilder: (context, row) => _DocumentDetail(document: row),
+      onDelete: (row) => context.read<DocumentRepository>().deleteDocument(
+        row['id'].toString(),
+      ),
     );
   }
 }
@@ -42,7 +53,7 @@ class _DocumentDetail extends StatelessWidget {
     final lookups = context.read<LookupRepository>();
     final id = document['id'].toString();
     Future<void> edit() async {
-      final changed = await showDialog<bool>(
+      final changed = await showPomgtDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => EntityFormDialog(
@@ -62,54 +73,60 @@ class _DocumentDetail extends StatelessWidget {
       child: Column(
         children: [
           DetailHeader(
-            icon: CupertinoIcons.doc_text,
+            icon: LucideIcons.fileText,
             title: document['title']?.toString() ?? 'Documento',
             subtitle:
                 '${document['document_code'] ?? 'Sin código'} · ${document['document_type']} · ${UiCopy.enumLabel(document['confidentiality']?.toString() ?? '')}',
             status: document['status']?.toString(),
-            help:
-                'Documento lógico. Las versiones almacenan el archivo real; los vínculos determinan dónde se utiliza y opcionalmente fijan una versión específica.',
+            help: 'Documento lógico. Las versiones almacenan el archivo real; los vínculos determinan dónde se utiliza y opcionalmente fijan una versión específica.',
             onEdit: edit,
           ),
           const Divider(height: 1),
           Expanded(
-            child: DefaultTabController(
+            child: PomgtTabController(
               length: 3,
               child: Column(
                 children: [
                   Container(
                     margin: const EdgeInsets.fromLTRB(18, 12, 18, 0),
-                    padding: const EdgeInsets.all(3),
                     decoration: const BoxDecoration(
-                      color: PomgtColors.surfaceAlt,
-                      borderRadius: PomgtRadii.borderSm,
+                      border: Border(
+                        bottom: BorderSide(color: PomgtColors.line),
+                      ),
                     ),
                     child: const TabBar(
                       isScrollable: true,
                       tabAlignment: TabAlignment.start,
                       dividerColor: Colors.transparent,
                       indicatorColor: PomgtColors.blue,
-                      indicator: BoxDecoration(
-                        color: PomgtColors.canvas,
-                        borderRadius: PomgtRadii.borderSm,
-                      ),
                       indicatorSize: TabBarIndicatorSize.tab,
                       labelColor: PomgtColors.ink,
                       unselectedLabelColor: PomgtColors.muted,
+                      labelStyle: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
                       tabs: [
-                        HelpTab(
-                          label: 'Información',
-                          help: 'Metadatos generales del documento lógico.',
+                        Tab(
+                          height: 52,
+                          child: HelpTab(
+                            label: 'Información',
+                            help: 'Metadatos generales del documento lógico.',
+                          ),
                         ),
-                        HelpTab(
-                          label: 'Versiones',
-                          help:
-                              'Archivos cargados y su historial de versiones inmutables.',
+                        Tab(
+                          height: 52,
+                          child: HelpTab(
+                            label: 'Versiones',
+                            help: 'Archivos cargados y su historial de versiones inmutables.',
+                          ),
                         ),
-                        HelpTab(
-                          label: 'Vínculos',
-                          help:
-                              'Entidades de POMGT donde se utiliza el documento y la versión que queda fijada.',
+                        Tab(
+                          height: 52,
+                          child: HelpTab(
+                            label: 'Vínculos',
+                            help: 'Entidades de POMGT donde se utiliza el documento y la versión que queda fijada.',
+                          ),
                         ),
                       ],
                     ),
@@ -128,8 +145,7 @@ class _DocumentDetail extends StatelessWidget {
                             lookups: lookups,
                             fixedValues: {'document_id': id},
                             title: 'Vínculos',
-                            description:
-                                'Relaciona este documento con una entidad de POMGT. Si fijas una versión, ese vínculo seguirá apuntando exactamente a esa versión aun cuando después se suban archivos nuevos.',
+                            description: 'Relaciona este documento con una entidad de POMGT. Si fijas una versión, ese vínculo seguirá apuntando exactamente a esa versión aun cuando después se suban archivos nuevos.',
                           ),
                         ),
                       ],
@@ -149,51 +165,55 @@ class _DocumentSummary extends StatelessWidget {
   const _DocumentSummary({required this.document});
   final Map<String, dynamic> document;
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              'Información documental',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(width: 7),
-            const InfoTip(
-              'Metadatos del documento, independientes de la versión del archivo.',
-            ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        Wrap(
-          spacing: 38,
-          runSpacing: 22,
-          children: [
-            _KV('Código', '${document['document_code'] ?? '—'}'),
-            _KV('Tipo', '${document['document_type']}'),
-            _KV(
-              'Estado',
-              UiCopy.enumLabel(document['status']?.toString() ?? ''),
-            ),
-            _KV(
-              'Confidencialidad',
-              UiCopy.enumLabel(document['confidentiality']?.toString() ?? ''),
-            ),
-          ],
-        ),
-        if (document['description'] != null) ...[
-          const SizedBox(height: 30),
-          Text(
-            document['description'].toString(),
-            style: const TextStyle(
-              color: PomgtColors.secondaryInk,
-              height: 1.5,
-            ),
+  Widget build(BuildContext context) => ScrollToTopArea(
+    padding: const EdgeInsets.all(16),
+    builder: (context, controller) => SingleChildScrollView(
+      controller: controller,
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Información documental',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(width: 7),
+              const InfoTip(
+                'Metadatos del documento, independientes de la versión del archivo.',
+              ),
+            ],
           ),
+          const SizedBox(height: 22),
+          Wrap(
+            spacing: 38,
+            runSpacing: 22,
+            children: [
+              _KV('Código', '${document['document_code'] ?? '—'}'),
+              _KV('Tipo', '${document['document_type']}'),
+              _KV(
+                'Estado',
+                UiCopy.enumLabel(document['status']?.toString() ?? ''),
+              ),
+              _KV(
+                'Confidencialidad',
+                UiCopy.enumLabel(document['confidentiality']?.toString() ?? ''),
+              ),
+            ],
+          ),
+          if (document['description'] != null) ...[
+            const SizedBox(height: 30),
+            Text(
+              document['description'].toString(),
+              style: const TextStyle(
+                color: PomgtColors.secondaryInk,
+                height: 1.5,
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     ),
   );
 }
@@ -243,7 +263,7 @@ class _VersionsPanelState extends State<_VersionsPanel> {
       return;
     }
     if (!mounted) return;
-    final meta = await showDialog<_VersionMeta>(
+    final meta = await showPomgtDialog<_VersionMeta>(
       context: context,
       builder: (_) => _VersionDialog(filename: file.name),
     );
@@ -286,20 +306,27 @@ class _VersionsPanelState extends State<_VersionsPanel> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(
-              'Versiones del archivo',
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Versiones del archivo',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(width: 7),
+                const InfoTip(
+                  'Cada carga crea una versión inmutable. Una sola versión se marca como actual; los vínculos pueden fijar cualquier versión anterior.',
+                ),
+              ],
             ),
-            const SizedBox(width: 7),
-            const InfoTip(
-              'Cada carga crea una versión inmutable. Una sola versión se marca como actual; los vínculos pueden fijar cualquier versión anterior.',
-            ),
-            const Spacer(),
             FilledButton.icon(
               onPressed: upload,
-              icon: const Icon(CupertinoIcons.cloud_upload, size: 17),
+              icon: const Icon(LucideIcons.cloudUpload, size: 17),
               label: const Text('Subir versión'),
             ),
           ],
@@ -310,9 +337,7 @@ class _VersionsPanelState extends State<_VersionsPanel> {
             future: future,
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                );
+                return const PomgtLoading();
               }
               if (snap.hasError) {
                 return Center(
@@ -334,59 +359,62 @@ class _VersionsPanelState extends State<_VersionsPanel> {
                   ),
                 );
               }
-              return ListView.separated(
-                itemCount: rows.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, i) {
-                  final r = rows[i];
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 5,
-                    ),
-                    leading: const Icon(CupertinoIcons.doc, size: 20),
-                    title: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            r['original_filename']?.toString() ?? 'Archivo',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        if (r['is_current'] == true) ...[
-                          const SizedBox(width: 9),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            color: PomgtColors.blueSoft,
-                            child: const Text(
-                              'Actual',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: PomgtColors.blue,
-                                fontWeight: FontWeight.w700,
+              return ScrollToTopArea(
+                padding: const EdgeInsets.all(12),
+                builder: (context, controller) => PomgtListView.separated(
+                  controller: controller,
+                  itemCount: rows.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final r = rows[i];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 5,
+                      ),
+                      leading: const Icon(LucideIcons.file, size: 20),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              r['original_filename']?.toString() ?? 'Archivo',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
+                          if (r['is_current'] == true) ...[
+                            const SizedBox(width: 9),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              color: PomgtColors.blueSoft,
+                              child: const Text(
+                                'Actual',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: PomgtColors.blue,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                    subtitle: Text(
-                      '${r['version_label'] ?? 'v${r['version_no']}'} · ${_size(r['size_bytes'])}${r['change_notes'] == null ? '' : ' · ${r['change_notes']}'}',
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Abrir archivo',
-                      onPressed: () => open(r),
-                      icon: const Icon(
-                        CupertinoIcons.arrow_up_right_square,
-                        size: 18,
                       ),
-                    ),
-                  );
-                },
+                      subtitle: Text(
+                        '${r['version_label'] ?? 'v${r['version_no']}'} · ${_size(r['size_bytes'])}${r['change_notes'] == null ? '' : ' · ${r['change_notes']}'}',
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Abrir archivo',
+                        onPressed: () => open(r),
+                        icon: const Icon(LucideIcons.externalLink, size: 18),
+                      ),
+                    );
+                  },
+                ),
               );
             },
           ),
@@ -451,7 +479,7 @@ class _VersionDialogState extends State<_VersionDialog> {
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 620;
     return AlertDialog(
-      title: const Text('Nueva versión'),
+      title: pomgtDialogTitle(context, 'Nueva versión'),
       content: SizedBox(
         width: compact ? width - 56 : 500,
         child: SingleChildScrollView(
@@ -468,7 +496,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                 controller: label,
                 decoration: const InputDecoration(
                   labelText: 'Etiqueta de versión',
-                  hintText: 'Ej. Rev C',
+                  hintText: 'Ej. V.03',
                 ),
               ),
               const SizedBox(height: 15),
@@ -478,6 +506,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                 maxLines: 4,
                 decoration: const InputDecoration(
                   labelText: 'Notas del cambio',
+                  hintText: 'Qué cambió en esta versión…',
                 ),
               ),
             ],

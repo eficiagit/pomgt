@@ -6,6 +6,9 @@ class OrderRepository extends BaseRepository {
   Future<List<Map<String, dynamic>>> orders() =>
       listTenant('customer_orders', orderBy: 'order_date');
 
+  Future<void> deleteOrder(String orderId) =>
+      service.rpc('delete_customer_order', params: {'p_order_id': orderId});
+
   Future<Map<String, dynamic>> detail(String orderId) async {
     final order = await service.one('customer_orders', orderId);
     if (order == null) throw StateError('Pedido no encontrado.');
@@ -86,17 +89,33 @@ class OrderRepository extends BaseRepository {
     }).toList();
   }
 
+  /// A readable folio (e.g. "LOTE-00007") shared by several production
+  /// orders created in the same release action, so they can be found and
+  /// treated as one job without merging them into a single OP — each still
+  /// needs its own product/BOM/routing/execution tracking.
+  Future<String> nextBatchNumber() async {
+    final org = organizationId;
+    if (org == null) throw StateError('No hay una organización seleccionada.');
+    final result = await service.rpc(
+      'next_sequence_value',
+      params: {'p_org': org, 'p_key': 'LOTE'},
+    );
+    return result.toString();
+  }
+
   Future<List<Map<String, dynamic>>> releaseLineToProduction({
     required String orderLineId,
     required List<double> quantities,
     DateTime? requiredAt,
     String priority = 'normal',
+    String? batchNumber,
   }) async {
     final params = {
       'p_order_line_id': orderLineId,
       'p_split_quantities': quantities,
       'p_required_at': requiredAt?.toIso8601String(),
       'p_priority': priority,
+      'p_batch_number': batchNumber,
     };
     dynamic result;
     try {
@@ -111,6 +130,7 @@ class OrderRepository extends BaseRepository {
         quantities: quantities,
         requiredAt: requiredAt,
         priority: priority,
+        batchNumber: batchNumber,
       );
     }
     return List<Map<String, dynamic>>.from(result as List);
@@ -133,6 +153,7 @@ class OrderRepository extends BaseRepository {
     required List<double> quantities,
     DateTime? requiredAt,
     required String priority,
+    String? batchNumber,
   }) async {
     final line = await service.one('customer_order_lines', orderLineId);
     if (line == null) throw StateError('Línea de pedido no encontrada.');
@@ -177,6 +198,7 @@ class OrderRepository extends BaseRepository {
               requiredAt?.toIso8601String() ??
               line['requested_delivery_date']?.toString(),
           'notes': 'Creada desde línea de pedido',
+          'batch_number': batchNumber,
           'created_by': userId,
           'updated_by': userId,
         });

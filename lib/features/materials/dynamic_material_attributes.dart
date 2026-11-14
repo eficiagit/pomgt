@@ -1,8 +1,14 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/widgets/categorized_picker.dart';
+import '../../core/widgets/number_input.dart';
+import '../../core/widgets/pomgt_date_picker.dart';
 
 class DynamicMaterialAttributeForm extends StatefulWidget {
   const DynamicMaterialAttributeForm({
@@ -92,7 +98,7 @@ class _DynamicMaterialAttributeFormState
               style: const TextStyle(
                 color: PomgtColors.ink,
                 fontSize: 13,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 10),
@@ -141,24 +147,21 @@ class _DynamicMaterialAttributeFormState
 
     if (type == 'select') {
       final rows = widget.options[id] ?? const <Map<String, dynamic>>[];
-      return DropdownButtonFormField<String>(
-        initialValue: widget.values[id]?.toString().isEmpty ?? true
+      return CategorizedSearchPicker(
+        label: label,
+        hint: 'Buscar opción…',
+        helperText: attr['help_text']?.toString(),
+        value: widget.values[id]?.toString().isEmpty ?? true
             ? null
             : widget.values[id]?.toString(),
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: label,
-          helperText: attr['help_text']?.toString(),
-        ),
-        items: rows
-            .where((row) => row['is_active'] != false)
-            .map(
-              (row) => DropdownMenuItem<String>(
-                value: row['option_value']?.toString(),
-                child: Text(row['option_label']?.toString() ?? ''),
-              ),
-            )
-            .toList(),
+        items: [
+          for (final row in rows.where((row) => row['is_active'] != false))
+            PickerItem(
+              id: row['option_value']?.toString() ?? '',
+              label: row['option_label']?.toString() ?? '',
+              category: 'Opciones',
+            ),
+        ],
         onChanged: (value) => _set(id, value),
         validator: required
             ? (value) => value == null ? 'Campo requerido' : null
@@ -197,10 +200,15 @@ class _DynamicMaterialAttributeFormState
 
     final controller = _controllers.putIfAbsent(
       id,
-      () => TextEditingController(text: widget.values[id]?.toString() ?? ''),
+      () => TextEditingController(
+        text: type == 'integer' || type == 'decimal'
+            ? formatNumberText(widget.values[id])
+            : widget.values[id]?.toString() ?? '',
+      ),
     );
     final date = type == 'date';
     return TextFormField(
+      errorBuilder: pomgtValidationMessage,
       controller: controller,
       readOnly: date,
       minLines: type == 'long_text' ? 3 : 1,
@@ -208,20 +216,35 @@ class _DynamicMaterialAttributeFormState
       keyboardType: type == 'integer' || type == 'decimal'
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.text,
+      inputFormatters: type == 'integer' || type == 'decimal'
+          ? [
+              ThousandsInputFormatter(
+                allowDecimal: type == 'decimal',
+                allowNegative: true,
+              ),
+            ]
+          : null,
       autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
         labelText: label,
-        hintText: attr['placeholder']?.toString(),
+        hintText:
+            attr['placeholder']?.toString() ??
+            (date
+                ? 'Selecciona una fecha'
+                : (type == 'integer' || type == 'decimal')
+                ? 'Ej. 0'
+                : 'Escribe ${label.replaceAll('*', '').trim().toLowerCase()}'),
         helperText: attr['help_text']?.toString(),
         suffix: suffix,
-        suffixIcon: date ? const Icon(CupertinoIcons.calendar, size: 17) : null,
+        suffixIcon: date ? const Icon(LucideIcons.calendar, size: 17) : null,
       ),
       validator: (value) {
         if (required && (value == null || value.trim().isEmpty)) {
           return 'Campo requerido';
         }
         if (value == null || value.trim().isEmpty) return null;
-        if (type == 'integer' && int.tryParse(value) == null) {
+        if (type == 'integer' &&
+            int.tryParse(value.replaceAll(',', '')) == null) {
           return 'Entero inválido';
         }
         if (type == 'decimal' && _parseDecimal(value) == null) {
@@ -236,8 +259,8 @@ class _DynamicMaterialAttributeFormState
 
   Future<void> _pickDate(String id, TextEditingController controller) async {
     final initial = DateTime.tryParse(controller.text) ?? DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
+    final picked = await showPomgtDatePicker(
+      context,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
       initialDate: initial,
@@ -288,39 +311,65 @@ class DynamicMaterialAttributeViewer extends StatelessWidget {
         style: TextStyle(color: PomgtColors.muted),
       );
     }
+    final sections = <String, List<Map<String, dynamic>>>{};
+    for (final attr in rows) {
+      final section = attr['section_name']?.toString().trim();
+      sections
+          .putIfAbsent(
+            section == null || section.isEmpty ? '' : section,
+            () => [],
+          )
+          .add(attr);
+    }
+    final multipleSections = sections.length > 1;
     return Column(
-      children: rows.map((attr) {
-        final value = valueByAttr[attr['id']?.toString()];
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 190,
-                child: Text(
-                  attr['label']?.toString() ?? 'Atributo',
-                  style: const TextStyle(
-                    color: PomgtColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final entry in sections.entries) ...[
+          if (multipleSections && entry.key.isNotEmpty) ...[
+            Text(
+              entry.key.toUpperCase(),
+              style: const TextStyle(
+                color: PomgtColors.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .4,
               ),
-              Expanded(
-                child: Text(
-                  _display(attr, value),
-                  style: const TextStyle(
-                    color: PomgtColors.ink,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const minTileWidth = 200.0;
+              const spacing = 20.0;
+              final columns =
+                  (((constraints.maxWidth + spacing) / (minTileWidth + spacing))
+                          .floor())
+                      .clamp(1, entry.value.length);
+              final tileWidth =
+                  (constraints.maxWidth - (columns - 1) * spacing) / columns;
+              return Wrap(
+                spacing: spacing,
+                runSpacing: 16,
+                children: [
+                  for (final attr in entry.value)
+                    SizedBox(
+                      width: tileWidth,
+                      child: _AttributeTile(
+                        label: attr['label']?.toString() ?? 'Atributo',
+                        value: _display(
+                          attr,
+                          valueByAttr[attr['id']?.toString()],
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
-        );
-      }).toList(),
+          SizedBox(height: multipleSections ? 22 : 0),
+        ],
+      ],
     );
   }
 
@@ -374,6 +423,40 @@ class DynamicMaterialAttributeViewer extends StatelessWidget {
     return symbol == null || symbol.isEmpty || raw == '—'
         ? raw
         : '$raw $symbol';
+  }
+}
+
+class _AttributeTile extends StatelessWidget {
+  const _AttributeTile({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: PomgtColors.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: PomgtColors.ink,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -454,7 +537,7 @@ String? materialAttributeValidationError(
     }
 
     if (text.isEmpty) continue;
-    if (type == 'integer' && int.tryParse(text) == null) {
+    if (type == 'integer' && int.tryParse(text.replaceAll(',', '')) == null) {
       return '$label debe ser un entero.';
     }
     if (type == 'decimal' && _parseDecimal(text) == null) {
@@ -467,10 +550,7 @@ String? materialAttributeValidationError(
 num? _parseDecimal(String value) {
   final text = value.trim();
   if (text.isEmpty) return null;
-  final normalized = text.contains(',') && !text.contains('.')
-      ? text.replaceAll(',', '.')
-      : text.replaceAll(',', '');
-  return num.tryParse(normalized);
+  return num.tryParse(text.replaceAll(',', ''));
 }
 
 Map<String, dynamic> materialAttributeFormValues(

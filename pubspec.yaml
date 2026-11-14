@@ -19,7 +19,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.12.2
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -49,6 +50,20 @@ dependencies:
   pdf: ^3.13.0
   printing: ^5.15.0
   web: ^1.1.1
+  desktop_drop: ^0.8.4
+  pdfrx: ^2.4.8
+  excel_plus: ^2.29.0
+  csv: ^8.0.0
+  lucide_icons_flutter: ^4.0.0
+  flutter_svg: ^2.3.0
+  animations: ^3.0.0
+  forui: ^0.27.6
+  shadcn_ui: ^0.57.2
+
+dependency_overrides:
+  # shadcn_ui 0.57.2 restricts Lucide to <4.0.0. Version 4 keeps the regular
+  # icon API and fixes the Flutter Web debug (DDC) StackOverflowError in v3.
+  lucide_icons_flutter: ^4.0.0
 
 dev_dependencies:
   flutter_test:
@@ -71,10 +86,23 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  fonts:
+    - family: IBM Plex Sans
+      fonts:
+        - asset: assets/fonts/IBMPlexSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSans-SemiBold.ttf
+          weight: 600
   assets:
+    - assets/illustrations/
     - assets/POMGT-FV.png
     - assets/POMGT-LOGO.png
     - assets/POMGT-LOGO-WHITE.png
+    - assets/fonts/IBM-Plex-LICENSE.txt
+    - assets/fonts/NotoSans-Regular.ttf
+    - assets/fonts/NotoSans-Bold.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

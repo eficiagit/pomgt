@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+
 import '../data/services/supabase_database_service.dart';
 import '../core/utils/error_copy.dart';
 import '../data/repositories/base_repository.dart';
@@ -34,6 +35,33 @@ class OrganizationController extends ChangeNotifier {
         e,
         fallback: 'No fue posible cargar tu organización.',
       );
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> acceptInvite(String token) async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      final result = await db.rpc(
+        'accept_organization_invite',
+        params: {'p_token': token.trim()},
+      );
+      final id = result is String ? result : result.toString();
+      organizationId = id;
+      organization = await db.one('organizations', id);
+      for (final repo in repositories) {
+        repo.setOrganization(id);
+      }
+    } catch (e) {
+      error = ErrorCopy.message(
+        e,
+        fallback: 'No fue posible unirte a la organización.',
+      );
+      rethrow;
     } finally {
       loading = false;
       notifyListeners();

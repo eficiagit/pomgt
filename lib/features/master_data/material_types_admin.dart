@@ -1,9 +1,19 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/utils/app_notice.dart';
+import '../../core/utils/error_copy.dart';
+import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/entity_crud_panel.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
@@ -21,6 +31,8 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
   String _search = '';
   bool? _activeFilter;
   String? _selectedId;
+  bool _deleting = false;
+  bool _deletePending = false;
 
   @override
   void initState() {
@@ -50,7 +62,7 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -61,7 +73,7 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
         title: row == null
             ? 'Nuevo tipo de material'
             : 'Editar tipo de material',
-        icon: CupertinoIcons.square_grid_2x2,
+        icon: LucideIcons.layoutGrid,
       ),
     );
     if (changed == true && mounted) {
@@ -81,8 +93,79 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
     _reload();
   }
 
+  Future<void> _delete(Map<String, dynamic> row) async {
+    if (_deletePending) return;
+    _deletePending = true;
+    final repository = context.read<GenericRepository>();
+    final lookups = context.read<LookupRepository>();
+    final spec = Phase1Schema.tables['material_types']!;
+    try {
+      final blocked = await repository.deletionBlockReason(spec, row);
+      if (!mounted) return;
+      if (blocked != null) {
+        await showPomgtDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: pomgtDialogTitle(context, 'Tipo de material en uso'),
+            content: Text(blocked),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+      final confirmed = await showPomgtDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: pomgtDialogTitle(
+            context,
+            'Eliminar tipo de material',
+            onClose: () => Navigator.pop(context, false),
+          ),
+          content: Text(
+            '¿Eliminar “${row['name'] ?? row['code'] ?? 'este tipo de material'}” permanentemente? Esta acción no se puede deshacer.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: PomgtColors.danger,
+              ),
+              icon: const Icon(LucideIcons.trash2, size: 17),
+              label: const Text('Eliminar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      setState(() => _deleting = true);
+      await repository.deleteRow(spec, row);
+      if (!mounted) return;
+      lookups.invalidate('material_types');
+      _selectedId = null;
+      _reload();
+      showPomgtSnackBar(context, 'Tipo de material eliminado.');
+    } catch (e) {
+      if (mounted) {
+        showPomgtSnackBar(context, ErrorCopy.message(e), isError: true);
+      }
+    } finally {
+      _deletePending = false;
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_deleting) return const PomgtLoading();
     return FutureBuilder<_TypeAdminData>(
       future: _future,
       builder: (context, snapshot) {
@@ -133,14 +216,16 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
               onSelect: (id) => setState(() => _selectedId = id),
               onRefresh: _reload,
               onCreate: () => _edit(),
+              onEdit: (row) => _edit(row),
+              onDelete: _delete,
+              onToggleActive: (row, active) => _setActive(row, active),
             );
             final detail = selected == null
                 ? const _AdminPanel(
-                    child: Center(
-                      child: Text(
-                        'Selecciona un tipo de material.',
-                        style: TextStyle(color: PomgtColors.muted),
-                      ),
+                    child: EmptyState(
+                      icon: LucideIcons.layoutGrid,
+                      title: 'Selecciona un tipo de material',
+                      message: 'Su ficha y atributos aparecerán aquí.',
                     ),
                   )
                 : _TypeDetail(
@@ -148,6 +233,7 @@ class _MaterialTypesAdminState extends State<MaterialTypesAdmin> {
                     type: selected,
                     data: data,
                     onEdit: () => _edit(selected),
+                    onDelete: () => _delete(selected),
                     onDeactivate: () => _setActive(selected, false),
                     onReactivate: () => _setActive(selected, true),
                     onChanged: _reload,
@@ -191,6 +277,9 @@ class _TypeList extends StatelessWidget {
     required this.onSelect,
     required this.onRefresh,
     required this.onCreate,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggleActive,
   });
   final List<Map<String, dynamic>> rows;
   final int total;
@@ -203,6 +292,9 @@ class _TypeList extends StatelessWidget {
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
   final VoidCallback onCreate;
+  final ValueChanged<Map<String, dynamic>> onEdit;
+  final ValueChanged<Map<String, dynamic>> onDelete;
+  final void Function(Map<String, dynamic> row, bool active) onToggleActive;
 
   @override
   Widget build(BuildContext context) => _AdminPanel(
@@ -216,24 +308,29 @@ class _TypeList extends StatelessWidget {
                 onChanged: onSearch,
                 decoration: const InputDecoration(
                   hintText: 'Buscar tipos...',
-                  prefixIcon: Icon(CupertinoIcons.search, size: 18),
+                  prefixIcon: Icon(LucideIcons.search, size: 18),
                 ),
               ),
             ),
             IconButton(
               tooltip: 'Actualizar',
               onPressed: onRefresh,
-              icon: const Icon(CupertinoIcons.refresh, size: 18),
-            ),
-            IconButton(
-              tooltip: 'Crear',
-              onPressed: onCreate,
-              icon: const Icon(CupertinoIcons.add, size: 19),
+              icon: const Icon(LucideIcons.refreshCw, size: 18),
             ),
           ],
         ),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: onCreate,
+            icon: const Icon(LucideIcons.plus, size: 17),
+            label: const Text('Nuevo tipo'),
+          ),
+        ),
         const SizedBox(height: 12),
         DropdownButtonFormField<bool?>(
+          errorBuilder: pomgtValidationMessage,
           initialValue: activeFilter,
           isExpanded: true,
           decoration: const InputDecoration(labelText: 'Estado'),
@@ -250,78 +347,167 @@ class _TypeList extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 12,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 8),
         Expanded(
           child: loading
-              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-              : ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    final selected = row['id']?.toString() == selectedId;
-                    return InkWell(
-                      borderRadius: PomgtRadii.borderSm,
-                      onTap: () => onSelect(row['id']?.toString()),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? PomgtColors.navySelected
-                              : PomgtColors.canvas,
-                          borderRadius: PomgtRadii.borderSm,
-                          border: Border.all(
-                            color: selected
-                                ? PomgtColors.navySelectedBorder
-                                : PomgtColors.line,
+              ? const PomgtLoading()
+              : rows.isEmpty
+              ? EmptyState(
+                  icon: LucideIcons.layoutGrid,
+                  title: 'Aún no hay tipos de material',
+                  message:
+                      'Crea el primero para empezar a clasificar materiales.',
+                  action: FilledButton.icon(
+                    label: const Text('Crear tipo'),
+                    icon: const Icon(LucideIcons.plus, size: 17),
+                    onPressed: onCreate,
+                  ),
+                )
+              : ScrollToTopArea(
+                  padding: const EdgeInsets.all(10),
+                  builder: (context, controller) => PomgtListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.only(bottom: 8),
+                    itemCount: rows.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final row = rows[index];
+                      final selected = row['id']?.toString() == selectedId;
+                      return InkWell(
+                        borderRadius: PomgtRadii.borderSm,
+                        onTap: () => onSelect(row['id']?.toString()),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 12,
                           ),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              CupertinoIcons.square_grid_2x2,
-                              size: 19,
-                              color: PomgtColors.ink,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? PomgtColors.navySelected
+                                : PomgtColors.canvas,
+                            borderRadius: PomgtRadii.borderSm,
+                            border: Border.all(
+                              color: selected
+                                  ? PomgtColors.navySelectedBorder
+                                  : PomgtColors.line,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    row['name']?.toString() ?? 'Tipo',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                LucideIcons.layoutGrid,
+                                size: 19,
+                                color: PomgtColors.ink,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      row['name']?.toString() ?? 'Tipo',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${row['code'] ?? '—'} · ${UiCopy.enumLabel(row['system_class']?.toString() ?? 'raw_material')}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: PomgtColors.muted,
+                                        fontSize: 11.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _Dot(active: row['is_active'] == true),
+                              PopupMenuButton<String>(
+                                popUpAnimationStyle: PomgtMotion.style(context),
+                                tooltip: 'Acciones',
+                                padding: EdgeInsets.zero,
+                                onSelected: (value) {
+                                  if (value == 'edit') onEdit(row);
+                                  if (value == 'delete') onDelete(row);
+                                  if (value == 'toggle') {
+                                    onToggleActive(
+                                      row,
+                                      row['is_active'] != true,
+                                    );
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        Icon(LucideIcons.pencil, size: 17),
+                                        SizedBox(width: 9),
+                                        Text('Editar'),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    '${row['code'] ?? '—'} · ${UiCopy.enumLabel(row['system_class']?.toString() ?? 'raw_material')}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: PomgtColors.muted,
-                                      fontSize: 11.5,
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          LucideIcons.trash2,
+                                          size: 17,
+                                          color: PomgtColors.danger,
+                                        ),
+                                        SizedBox(width: 9),
+                                        Text(
+                                          'Eliminar',
+                                          style: TextStyle(
+                                            color: PomgtColors.danger,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'toggle',
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          row['is_active'] == true
+                                              ? LucideIcons.circleOff
+                                              : LucideIcons.circleCheck,
+                                          size: 17,
+                                        ),
+                                        const SizedBox(width: 9),
+                                        Text(
+                                          row['is_active'] == true
+                                              ? 'Desactivar'
+                                              : 'Reactivar',
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
+                                child: const Padding(
+                                  padding: EdgeInsets.all(6),
+                                  child: Icon(
+                                    LucideIcons.ellipsisVertical,
+                                    size: 17,
+                                    color: PomgtColors.muted,
+                                  ),
+                                ),
                               ),
-                            ),
-                            _Dot(active: row['is_active'] == true),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
       ],
@@ -335,6 +521,7 @@ class _TypeDetail extends StatelessWidget {
     required this.type,
     required this.data,
     required this.onEdit,
+    required this.onDelete,
     required this.onDeactivate,
     required this.onReactivate,
     required this.onChanged,
@@ -342,6 +529,7 @@ class _TypeDetail extends StatelessWidget {
   final Map<String, dynamic> type;
   final _TypeAdminData data;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
   final VoidCallback onDeactivate;
   final VoidCallback onReactivate;
   final VoidCallback onChanged;
@@ -369,68 +557,92 @@ class _TypeDetail extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '${type['code'] ?? '—'} · ${type['name'] ?? 'Tipo de material'}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: PomgtColors.ink,
-                                fontSize: 21,
-                                fontWeight: FontWeight.w900,
-                              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final titleBlock = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            '${type['code'] ?? '—'} · ${type['name'] ?? 'Tipo de material'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: PomgtColors.ink,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          _Status(active: type['is_active'] == true),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        UiCopy.enumLabel(
-                          type['system_class']?.toString() ?? 'raw_material',
                         ),
-                        style: const TextStyle(
-                          color: PomgtColors.muted,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        const SizedBox(width: 10),
+                        _Status(active: type['is_active'] == true),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      UiCopy.enumLabel(
+                        type['system_class']?.toString() ?? 'raw_material',
                       ),
+                      style: const TextStyle(
+                        color: PomgtColors.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                );
+                final actions = [
+                  TextButton.icon(
+                    onPressed: onDelete,
+                    style: TextButton.styleFrom(
+                      foregroundColor: PomgtColors.danger,
+                    ),
+                    icon: const Icon(LucideIcons.trash2, size: 17),
+                    label: const Text('Eliminar'),
+                  ),
+                  TextButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(LucideIcons.pencil, size: 17),
+                    label: const Text('Editar'),
+                  ),
+                  TextButton.icon(
+                    onPressed: type['is_active'] == true
+                        ? onDeactivate
+                        : onReactivate,
+                    icon: Icon(
+                      type['is_active'] == true
+                          ? LucideIcons.pause
+                          : LucideIcons.play,
+                      size: 17,
+                    ),
+                    label: Text(
+                      type['is_active'] == true ? 'Desactivar' : 'Reactivar',
+                    ),
+                  ),
+                ];
+                if (constraints.maxWidth < 680) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      titleBlock,
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 4, runSpacing: 4, children: actions),
                     ],
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(CupertinoIcons.pencil, size: 17),
-                  label: const Text('Editar'),
-                ),
-                TextButton.icon(
-                  onPressed: type['is_active'] == true
-                      ? onDeactivate
-                      : onReactivate,
-                  icon: Icon(
-                    type['is_active'] == true
-                        ? CupertinoIcons.pause
-                        : CupertinoIcons.play,
-                    size: 17,
-                  ),
-                  label: Text(
-                    type['is_active'] == true ? 'Desactivar' : 'Reactivar',
-                  ),
-                ),
-              ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: titleBlock),
+                    ...actions,
+                  ],
+                );
+              },
             ),
           ),
           const Divider(height: 1),
           Expanded(
-            child: DefaultTabController(
+            child: PomgtTabController(
               length: 3,
               child: Column(
                 children: [
@@ -486,47 +698,54 @@ class _TypeDetail extends StatelessWidget {
                           ),
                           Padding(
                             padding: const EdgeInsets.all(16),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  child: EntityCrudPanel(
-                                    table: 'material_attribute_definitions',
-                                    repository: context
-                                        .read<GenericRepository>(),
-                                    lookups: context.read<LookupRepository>(),
-                                    fixedValues: {'material_type_id': id},
-                                    title: 'Atributos técnicos',
-                                    description:
-                                        'Define las especificaciones que se capturan para este tipo de material.',
-                                    onChanged: onChanged,
-                                    flatList: true,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final definitions = EntityCrudPanel(
+                                  table: 'material_attribute_definitions',
+                                  repository: context.read<GenericRepository>(),
+                                  lookups: context.read<LookupRepository>(),
+                                  fixedValues: {'material_type_id': id},
+                                  title: 'Atributos técnicos',
+                                  description: 'Define las especificaciones que se capturan para este tipo de material.',
+                                  onChanged: onChanged,
+                                  flatList: true,
+                                );
+                                if (optionAttrs.isEmpty) return definitions;
+                                final options = EntityCrudPanel(
+                                  table: 'material_attribute_options',
+                                  repository: context.read<GenericRepository>(),
+                                  lookups: context.read<LookupRepository>(),
+                                  title: 'Opciones para selección',
+                                  description: 'Opciones permitidas para atributos de tipo selección o selección múltiple.',
+                                  referenceRows: {
+                                    'attribute_definition_id': optionAttrs,
+                                  },
+                                  rowFilter: (row) => optionAttrIds.contains(
+                                    row['attribute_definition_id']?.toString(),
                                   ),
-                                ),
-                                if (optionAttrs.isNotEmpty) ...[
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: EntityCrudPanel(
-                                      table: 'material_attribute_options',
-                                      repository: context
-                                          .read<GenericRepository>(),
-                                      lookups: context.read<LookupRepository>(),
-                                      title: 'Opciones para selección',
-                                      description:
-                                          'Opciones permitidas para atributos de tipo selección o selección múltiple.',
-                                      referenceRows: {
-                                        'attribute_definition_id': optionAttrs,
-                                      },
-                                      rowFilter: (row) =>
-                                          optionAttrIds.contains(
-                                            row['attribute_definition_id']
-                                                ?.toString(),
-                                          ),
-                                      flatList: true,
-                                    ),
-                                  ),
-                                ],
-                              ],
+                                  flatList: true,
+                                );
+                                if (constraints.maxWidth < 760) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      definitions,
+                                      const SizedBox(height: 12),
+                                      options,
+                                    ],
+                                  );
+                                }
+                                return Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(child: definitions),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: options),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                           _MaterialRows(rows: materials),
@@ -558,19 +777,23 @@ class _MaterialRows extends StatelessWidget {
         ),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(18),
-      itemCount: rows.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final row = rows[index];
-        return ListTile(
-          dense: true,
-          leading: const Icon(CupertinoIcons.cube_box, color: PomgtColors.blue),
-          title: Text('${row['sku'] ?? '—'} · ${row['name'] ?? 'Material'}'),
-          trailing: _Status(active: row['is_active'] == true),
-        );
-      },
+    return ScrollToTopArea(
+      padding: const EdgeInsets.all(10),
+      builder: (context, controller) => PomgtListView.separated(
+        controller: controller,
+        padding: const EdgeInsets.all(18),
+        itemCount: rows.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final row = rows[index];
+          return ListTile(
+            dense: true,
+            leading: const Icon(LucideIcons.box, color: PomgtColors.blue),
+            title: Text('${row['sku'] ?? '—'} · ${row['name'] ?? 'Material'}'),
+            trailing: _Status(active: row['is_active'] == true),
+          );
+        },
+      ),
     );
   }
 }
@@ -602,20 +825,23 @@ class _Status extends StatelessWidget {
   final bool active;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      _Dot(active: active),
-      const SizedBox(width: 6),
-      Text(
-        active ? 'Activo' : 'Inactivo',
-        style: TextStyle(
-          color: active ? PomgtColors.mint : PomgtColors.danger,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
+  Widget build(BuildContext context) => PomgtAnimatedValue(
+    value: active,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Dot(active: active),
+        const SizedBox(width: 6),
+        Text(
+          active ? 'Activo' : 'Inactivo',
+          style: TextStyle(
+            color: active ? PomgtColors.mint : PomgtColors.danger,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
@@ -650,7 +876,7 @@ class _Kv extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 11.5,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 5),
@@ -658,7 +884,7 @@ class _Kv extends StatelessWidget {
           value,
           style: const TextStyle(
             color: PomgtColors.ink,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],

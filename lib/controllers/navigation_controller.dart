@@ -9,8 +9,10 @@ enum AppSection {
   bom,
   routings,
   production,
+  floorMap,
   documents,
   masterData,
+  roles,
   schema,
 }
 

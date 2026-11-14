@@ -1,7 +1,7 @@
 import 'base_repository.dart';
 
 class MaterialRepository extends BaseRepository {
-  MaterialRepository(super.service, super.client);
+  MaterialRepository(super.service, super.client, {super.runtimeData});
 
   Future<List<Map<String, dynamic>>> materials() {
     return listTenant('products', orderBy: 'name');
@@ -61,6 +61,7 @@ class MaterialRepository extends BaseRepository {
       'create_material_with_revision',
       params: {'p_material': payload, 'p_attribute_values': attributeValues},
     );
+    runtimeData?.tableChanged('products');
     return Map<String, dynamic>.from(result as Map);
   }
 

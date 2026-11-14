@@ -1,6 +1,12 @@
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+import '../../core/widgets/scroll_to_top.dart';
+
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/pomgt_theme.dart';
@@ -8,6 +14,7 @@ import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/orientation_lock.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/widgets/number_input.dart';
 import '../../data/repositories/production_repository.dart';
 
 class ProductionOperatorDisplay extends StatefulWidget {
@@ -29,7 +36,7 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
   late Future<Map<String, dynamic>> _future;
   int _index = 0;
   bool _busy = false;
-  final Set<String> _autoStarted = <String>{};
+  bool _startingProduction = false;
 
   ProductionRepository get _repository => widget.repository;
 
@@ -112,7 +119,7 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
         if (mounted) setState(() => _busy = false);
       }
     }
-    final result = await showDialog<_OperatorSignature>(
+    final result = await showPomgtDialog<_OperatorSignature>(
       context: context,
       builder: (_) => _OperatorSignatureDialog(operation: activeOperation),
     );
@@ -175,25 +182,82 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
     showPomgtSnackBar(context, message);
   }
 
-  void _maybeAutoStart(Map<String, dynamic> operation) {
-    final operationId = operation['id']?.toString();
-    if (operationId == null || operationId.startsWith('routing:')) return;
-    final status = operation['status']?.toString() ?? 'pending';
-    if (!['ready', 'pending'].contains(status)) return;
-    if (!_autoStarted.add(operationId)) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      try {
-        await _repository.transitionOperation(
-          operationId,
-          'in_progress',
-          note: 'Inicio automatico en display operador.',
-        );
-        if (mounted) _reload(nextIndex: _index);
-      } catch (e) {
-        if (mounted) _showError(ErrorCopy.message(e));
-      }
+  Future<void> _startProduction(Map<String, dynamic> operation) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _startingProduction = true;
     });
+    try {
+      var operationId = operation['id']?.toString();
+      var targetIndex = _index;
+      if (operationId == null || operationId.startsWith('routing:')) {
+        final data = await _repository.ensureOperationalSnapshot(
+          widget.orderId,
+        );
+        final activeOperations = _list(data['operations']);
+        final routingOperationId = operation['routing_operation_id']
+            ?.toString();
+        final sequenceNo = operation['sequence_no']?.toString();
+        final match = activeOperations.indexWhere((row) {
+          if (routingOperationId != null &&
+              row['routing_operation_id']?.toString() == routingOperationId) {
+            return true;
+          }
+          return sequenceNo != null &&
+              row['sequence_no']?.toString() == sequenceNo;
+        });
+        if (match < 0) {
+          throw StateError(
+            'No fue posible ubicar la operación para iniciar producción.',
+          );
+        }
+        operationId = activeOperations[match]['id']?.toString();
+        targetIndex = match;
+      }
+      if (operationId == null) {
+        throw StateError('No fue posible identificar la operación a iniciar.');
+      }
+      await _repository.transitionOperation(
+        operationId,
+        'in_progress',
+        note: 'Inicio de producción desde display operador.',
+      );
+      final data = await _repository.detail(widget.orderId);
+      if (!mounted) return;
+      setState(() {
+        _index = targetIndex;
+        _future = Future.value(data);
+      });
+      _showSuccess('Producción iniciada.');
+    } catch (e) {
+      if (mounted) _showError(ErrorCopy.message(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _startingProduction = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _prepareOrder() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final data = await _repository.ensureOperationalSnapshot(widget.orderId);
+      if (!mounted) return;
+      setState(() {
+        _index = 0;
+        _future = Future.value(data);
+      });
+      _showSuccess('Orden preparada. Ruta de fabricación congelada.');
+    } catch (e) {
+      if (mounted) _showError(ErrorCopy.message(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -204,9 +268,10 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
         child: FutureBuilder<Map<String, dynamic>>(
           future: _future,
           builder: (context, snapshot) {
+            if (_startingProduction) return const PomgtLoading();
             if (snapshot.connectionState == ConnectionState.waiting &&
                 snapshot.data == null) {
-              return const Center(child: CircularProgressIndicator());
+              return const PomgtLoading();
             }
             if (snapshot.hasError) {
               return _DisplayError(
@@ -214,7 +279,7 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
                   snapshot.error!,
                   fallback: 'No fue posible abrir el display de operación.',
                 ),
-                onRetry: () => _reload(),
+                onAction: () => _reload(),
               );
             }
             final data = snapshot.data ?? const <String, dynamic>{};
@@ -223,14 +288,19 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
             final product = _map(data['product']);
             if (operations.isEmpty) {
               return _DisplayError(
-                message:
-                    'La OP no tiene secuencia operativa. Prepara la orden para congelar la ruta de fabricación.',
-                onRetry: () => _reload(),
+                message: 'La OP no tiene secuencia operativa. Prepara la orden para congelar la ruta de fabricación.',
+                onAction: _prepareOrder,
+                actionLabel: 'Preparar orden',
+                actionIcon: LucideIcons.clipboardCheck,
+                busy: _busy,
               );
             }
             final safeIndex = _index.clamp(0, operations.length - 1);
             final operation = operations[safeIndex];
-            _maybeAutoStart(operation);
+            final started = operations.any((row) {
+              final status = row['status']?.toString() ?? 'pending';
+              return !['pending', 'ready'].contains(status);
+            });
             return Column(
               children: [
                 _DisplayHeader(
@@ -238,43 +308,47 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
                   product: product,
                   index: safeIndex,
                   total: operations.length,
+                  operations: operations,
+                  selectedIndex: safeIndex,
+                  onSelect: (value) => setState(() => _index = value),
                   onClose: () => Navigator.pop(context),
                 ),
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 780;
-                      return SingleChildScrollView(
-                        padding: EdgeInsets.fromLTRB(
-                          compact ? 14 : 28,
-                          compact ? 14 : 22,
-                          compact ? 14 : 28,
-                          20,
+                  child: started
+                      ? LayoutBuilder(
+                          builder: (context, constraints) {
+                            final compact = constraints.maxWidth < 780;
+                            return ScrollToTopArea(
+                              padding: const EdgeInsets.all(16),
+                              builder: (context, controller) =>
+                                  SingleChildScrollView(
+                                    controller: controller,
+                                    padding: EdgeInsets.fromLTRB(
+                                      compact ? 14 : 28,
+                                      compact ? 14 : 22,
+                                      compact ? 14 : 28,
+                                      20,
+                                    ),
+                                    child: _CurrentStepPanel(
+                                      data: data,
+                                      operation: operation,
+                                      position: safeIndex + 1,
+                                      total: operations.length,
+                                      compact: compact,
+                                    ),
+                                  ),
+                            );
+                          },
+                        )
+                      : _ProductionStartPreview(
+                          data: data,
+                          order: order,
+                          busy: _busy,
+                          onStart: () => _startProduction(operation),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _StepProgress(
-                              operations: operations,
-                              selectedIndex: safeIndex,
-                              onSelect: (value) =>
-                                  setState(() => _index = value),
-                            ),
-                            SizedBox(height: compact ? 14 : 20),
-                            _CurrentStepPanel(
-                              data: data,
-                              operation: operation,
-                              position: safeIndex + 1,
-                              total: operations.length,
-                              compact: compact,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
                 ),
                 _DisplayActions(
+                  started: started,
                   busy: _busy,
                   canBack: safeIndex > 0,
                   canForward: safeIndex < operations.length - 1,
@@ -286,6 +360,7 @@ class _ProductionOperatorDisplayState extends State<ProductionOperatorDisplay> {
                   onBack: () => setState(() => _index = safeIndex - 1),
                   onForward: () => setState(() => _index = safeIndex + 1),
                   onFinish: () => _finishStep(operation, operations),
+                  onStart: () => _startProduction(operation),
                 ),
               ],
             );
@@ -302,6 +377,9 @@ class _DisplayHeader extends StatelessWidget {
     required this.product,
     required this.index,
     required this.total,
+    required this.operations,
+    required this.selectedIndex,
+    required this.onSelect,
     required this.onClose,
   });
 
@@ -309,23 +387,27 @@ class _DisplayHeader extends StatelessWidget {
   final Map<String, dynamic> product;
   final int index;
   final int total;
+  final List<Map<String, dynamic>> operations;
+  final int selectedIndex;
+  final ValueChanged<int> onSelect;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+      padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
       decoration: const BoxDecoration(
         color: PomgtColors.surface,
         border: Border(bottom: BorderSide(color: PomgtColors.lineStrong)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.smart_display_outlined, color: PomgtColors.blue),
+          const Icon(LucideIcons.monitorPlay, color: PomgtColors.blue),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   'Display operador · ${_show(order['op_number'])}',
@@ -333,7 +415,7 @@ class _DisplayHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w600,
                     color: PomgtColors.ink,
                   ),
                 ),
@@ -351,10 +433,32 @@ class _DisplayHeader extends StatelessWidget {
               ],
             ),
           ),
+          if (operations.isNotEmpty) ...[
+            const SizedBox(width: 16),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: _StepProgress.contentWidth(
+                    operations.length,
+                    dense: true,
+                  ).clamp(0, 420),
+                ),
+                child: _StepProgress(
+                  operations: operations,
+                  selectedIndex: selectedIndex,
+                  onSelect: onSelect,
+                  dense: true,
+                  background: PomgtColors.surface,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Cerrar display',
             onPressed: onClose,
-            icon: const Icon(CupertinoIcons.xmark),
+            icon: const Icon(LucideIcons.x),
           ),
         ],
       ),
@@ -362,38 +466,176 @@ class _DisplayHeader extends StatelessWidget {
   }
 }
 
-class _StepProgress extends StatelessWidget {
+class _StepProgress extends StatefulWidget {
   const _StepProgress({
     required this.operations,
     required this.selectedIndex,
     required this.onSelect,
+    this.dense = false,
+    this.background = PomgtColors.appBg,
   });
 
   final List<Map<String, dynamic>> operations;
   final int selectedIndex;
   final ValueChanged<int> onSelect;
+  final bool dense;
+  final Color background;
+
+  /// Width needed to show [count] steps without scrolling.
+  static double contentWidth(int count, {bool dense = false}) {
+    if (count <= 0) return 0;
+    final item = dense ? 78.0 : 112.0;
+    final connector = dense ? 64.0 : 96.0;
+    return count * item + (count - 1) * connector;
+  }
+
+  @override
+  State<_StepProgress> createState() => _StepProgressState();
+}
+
+class _StepProgressState extends State<_StepProgress> {
+  final _controller = ScrollController();
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  double get _itemWidth => widget.dense ? 78.0 : 112.0;
+  double get _connectorWidth => widget.dense ? 64.0 : 96.0;
+  double get _stepExtent => _itemWidth + _connectorWidth;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_updateFades);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateFades();
+      _scrollToSelected(animate: false);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _StepProgress oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedIndex != widget.selectedIndex ||
+        oldWidget.operations.length != widget.operations.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateFades();
+        _scrollToSelected();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_updateFades);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateFades() {
+    if (!mounted || !_controller.hasClients) return;
+    final position = _controller.position;
+    final canLeft = position.pixels > 4;
+    final canRight = position.pixels < position.maxScrollExtent - 4;
+    if (canLeft != _canScrollLeft || canRight != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = canLeft;
+        _canScrollRight = canRight;
+      });
+    }
+  }
+
+  void _scrollToSelected({bool animate = true}) {
+    if (!_controller.hasClients) return;
+    final viewport = _controller.position.viewportDimension;
+    final target =
+        (widget.selectedIndex * _stepExtent) -
+        (viewport / 2) +
+        (_itemWidth / 2);
+    final clamped = target.clamp(0.0, _controller.position.maxScrollExtent);
+    if (animate) {
+      _controller.animateTo(
+        clamped,
+        duration: PomgtMotion.duration(context, PomgtMotion.medium),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _controller.jumpTo(clamped);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    final list = SingleChildScrollView(
+      controller: _controller,
       scrollDirection: Axis.horizontal,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < operations.length; i++) ...[
+          for (var i = 0; i < widget.operations.length; i++) ...[
             _StepProgressItem(
-              operation: operations[i],
-              selected: i == selectedIndex,
-              onTap: () => onSelect(i),
+              operation: widget.operations[i],
+              selected: i == widget.selectedIndex,
+              dense: widget.dense,
+              onTap: () => widget.onSelect(i),
             ),
-            if (i < operations.length - 1)
+            if (i < widget.operations.length - 1)
               Container(
-                width: 96,
+                width: _connectorWidth,
                 height: 1,
-                margin: const EdgeInsets.only(top: 23),
+                margin: EdgeInsets.only(top: widget.dense ? 17 : 23),
                 color: PomgtColors.lineStrong,
               ),
           ],
+        ],
+      ),
+    );
+    return SizedBox(
+      height: widget.dense ? 74 : 96,
+      child: Stack(
+        children: [
+          Positioned.fill(child: list),
+          if (_canScrollLeft)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  width: 28,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        widget.background,
+                        widget.background.withValues(alpha: 0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_canScrollRight)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  width: 28,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerRight,
+                      end: Alignment.centerLeft,
+                      colors: [
+                        widget.background,
+                        widget.background.withValues(alpha: 0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -405,10 +647,12 @@ class _StepProgressItem extends StatelessWidget {
     required this.operation,
     required this.selected,
     required this.onTap,
+    this.dense = false,
   });
 
   final Map<String, dynamic> operation;
   final bool selected;
+  final bool dense;
   final VoidCallback onTap;
 
   @override
@@ -420,16 +664,19 @@ class _StepProgressItem extends StatelessWidget {
         : selected
         ? PomgtColors.blue
         : PomgtColors.muted;
+    final size = dense ? 34.0 : 46.0;
     return InkWell(
       onTap: onTap,
-      borderRadius: PomgtRadii.borderSm,
+      borderRadius: PomgtRadii.borderMd,
       child: SizedBox(
-        width: 112,
+        width: dense ? 78 : 112,
         child: Column(
           children: [
-            Container(
-              width: 46,
-              height: 46,
+            AnimatedContainer(
+              duration: PomgtMotion.duration(context, PomgtMotion.fast),
+              curve: PomgtMotion.curve,
+              width: size,
+              height: size,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: selected ? PomgtColors.blue : PomgtColors.surface,
@@ -437,21 +684,21 @@ class _StepProgressItem extends StatelessWidget {
                 border: Border.all(color: color, width: selected ? 2 : 1),
               ),
               child: done && !selected
-                  ? const Icon(
-                      CupertinoIcons.check_mark,
+                  ? Icon(
+                      LucideIcons.check,
                       color: PomgtColors.success,
-                      size: 17,
+                      size: dense ? 14 : 17,
                     )
                   : Text(
                       _show(operation['sequence_no']),
                       style: TextStyle(
                         color: selected ? PomgtColors.canvas : color,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        fontSize: dense ? 12.5 : 15,
                       ),
                     ),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: dense ? 4 : 6),
             Text(
               _show(operation['name']),
               maxLines: 1,
@@ -459,8 +706,8 @@ class _StepProgressItem extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: selected ? PomgtColors.blue : PomgtColors.secondaryInk,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                fontSize: dense ? 10.5 : 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w600,
               ),
             ),
           ],
@@ -478,18 +725,21 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = success ? PomgtColors.success : PomgtColors.blue;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
+    return PomgtAnimatedValue(
+      value: (text, success),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .10),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -511,8 +761,10 @@ class _OperatorCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
-        borderRadius: PomgtRadii.borderSm,
-        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .65)),
+        borderRadius: PomgtRadii.borderMd,
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
       ),
       child: child,
     );
@@ -538,7 +790,7 @@ class _CardTitle extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.ink,
             fontSize: 15,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -572,51 +824,74 @@ class _CurrentStepPanel extends StatelessWidget {
     )['name'];
     final machine = _map(machines[operation['machine_id']?.toString()])['name'];
     final materials = _linkedMaterials(data, operation);
-    final firstMaterial = materials.isEmpty ? const <String, dynamic>{} : materials.first;
+    final firstMaterial = materials.isEmpty
+        ? const <String, dynamic>{}
+        : materials.first;
     final fields = <_DisplayField>[
       _DisplayField(
         'Tipo',
         UiCopy.enumLabel(_show(operation['operation_type'])),
-        icon: CupertinoIcons.gear_alt,
+        icon: LucideIcons.settings,
       ),
-      _DisplayField('Centro', _show(workCenter), icon: CupertinoIcons.building_2_fill),
-      _DisplayField('Maquina', _show(machine), icon: Icons.precision_manufacturing_outlined),
+      _DisplayField('Centro', _show(workCenter), icon: LucideIcons.building2),
+      _DisplayField('Maquina', _show(machine), icon: LucideIcons.factory),
       _DisplayField(
         'Cantidad / planificada',
         '${_fmt(operation['completed_quantity'])} / ${_fmt(operation['planned_quantity'])} ${_show(order['uom_symbol'])}',
-        icon: CupertinoIcons.doc_text,
+        icon: LucideIcons.fileText,
       ),
       _DisplayField(
         'Estado',
         UiCopy.enumLabel(_show(operation['status'])),
-        icon: CupertinoIcons.check_mark_circled,
-        success: ['completed', 'skipped'].contains(operation['status']?.toString()),
+        icon: LucideIcons.circleCheck,
+        success: [
+          'completed',
+          'skipped',
+        ].contains(operation['status']?.toString()),
       ),
-      _DisplayField('Inicio real', _dateTime(operation['actual_start_at']), icon: CupertinoIcons.calendar),
-      _DisplayField('Fin real', _dateTime(operation['actual_end_at']), icon: CupertinoIcons.calendar),
-      _DisplayField('Tiempo registrado', _elapsed(operation), icon: CupertinoIcons.clock),
-      _DisplayField('Tiempo esperado', _operationTime(operation), icon: CupertinoIcons.clock),
+      _DisplayField(
+        'Inicio real',
+        _dateTime(operation['actual_start_at']),
+        icon: LucideIcons.calendar,
+      ),
+      _DisplayField(
+        'Fin real',
+        _dateTime(operation['actual_end_at']),
+        icon: LucideIcons.calendar,
+      ),
+      _DisplayField(
+        'Tiempo registrado',
+        _elapsed(operation),
+        icon: LucideIcons.clock,
+      ),
+      _DisplayField(
+        'Tiempo esperado',
+        _operationTime(operation),
+        icon: LucideIcons.clock,
+      ),
       _DisplayField(
         'Metodo de consumo',
         UiCopy.enumLabel(_show(firstMaterial['issue_method'] ?? 'manual')),
-        icon: Icons.storage_outlined,
+        icon: LucideIcons.database,
       ),
       _DisplayField(
-        'Revision',
+        'Versión',
         _show(order['bom_revision_code'] ?? order['routing_revision_code']),
-        icon: CupertinoIcons.checkmark_square,
+        icon: LucideIcons.squareCheck,
       ),
       _DisplayField(
         'Notas',
         _show(operation['notes']),
-        icon: CupertinoIcons.doc_plaintext,
+        icon: LucideIcons.fileText,
       ),
     ];
     return Container(
       decoration: BoxDecoration(
         color: PomgtColors.surface,
-        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .65)),
-        borderRadius: PomgtRadii.borderSm,
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
+        borderRadius: PomgtRadii.borderMd,
       ),
       child: Padding(
         padding: EdgeInsets.all(compact ? 16 : 24),
@@ -633,51 +908,61 @@ class _CurrentStepPanel extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _show(operation['name']),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 30,
-                          height: 1,
-                          fontWeight: FontWeight.w900,
-                          color: PomgtColors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${_show(operation['operation_code'])} · Paso $position de $total',
-                        style: const TextStyle(
-                          color: PomgtColors.blue,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      if ((operation['description']?.toString() ?? operation['instructions']?.toString() ?? '')
-                          .trim()
-                          .isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          (operation['description'] ?? operation['instructions']).toString(),
-                          maxLines: 2,
+                          _show(operation['name']),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: PomgtColors.secondaryInk,
-                            fontSize: 13,
+                            fontSize: 30,
+                            height: 1,
                             fontWeight: FontWeight.w600,
-                            height: 1.35,
+                            color: PomgtColors.ink,
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${_show(operation['operation_code'])} · Paso $position de $total',
+                          style: const TextStyle(
+                            color: PomgtColors.blue,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if ((operation['description']?.toString() ??
+                                operation['instructions']?.toString() ??
+                                '')
+                            .trim()
+                            .isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            (operation['description'] ??
+                                    operation['instructions'])
+                                .toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: PomgtColors.secondaryInk,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
                 ),
                 if (!compact) ...[
                   const SizedBox(width: 20),
-                  Expanded(flex: 5, child: _ResponsiveFieldGrid(fields: fields, compact: compact)),
+                  Expanded(
+                    flex: 5,
+                    child: _ResponsiveFieldGrid(
+                      fields: fields,
+                      compact: compact,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -714,14 +999,17 @@ class _LargeStepNumber extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.surfaceAlt,
         shape: BoxShape.circle,
-        border: Border.all(color: PomgtColors.lineStrong, width: 2),
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+          width: 2,
+        ),
       ),
       child: Text(
         value,
         style: const TextStyle(
           color: PomgtColors.secondaryInk,
           fontSize: 26,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -771,7 +1059,7 @@ class _FieldCell extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.ink,
               fontSize: 14,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               height: 1.15,
             ),
           );
@@ -793,7 +1081,7 @@ class _FieldCell extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 5),
@@ -817,12 +1105,14 @@ class _InstructionBlock extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: PomgtColors.surfaceAlt.withValues(alpha: .5),
-        border: Border.all(color: PomgtColors.lineStrong),
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.engineering_outlined, color: PomgtColors.blue),
+          const Icon(LucideIcons.hardHat, color: PomgtColors.blue),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -853,13 +1143,16 @@ class _OperationMaterials extends StatelessWidget {
     final verified = materials.length;
     final trailing = materials.isEmpty
         ? null
-        : _StatusChip('Materiales verificados ($verified/${materials.length})', success: true);
+        : _StatusChip(
+            'Materiales verificados ($verified/${materials.length})',
+            success: true,
+          );
     if (materials.isEmpty) {
       return _OperatorCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: const [
-            _CardTitle('Materiales de este paso', icon: CupertinoIcons.cube_box),
+            _CardTitle('Materiales de este paso', icon: LucideIcons.box),
             SizedBox(height: 14),
             Text(
               'Sin consumo de materiales asociado directamente a esta operacion.',
@@ -880,15 +1173,14 @@ class _OperationMaterials extends StatelessWidget {
         children: [
           _CardTitle(
             'Materiales de este paso',
-            icon: CupertinoIcons.cube_box,
+            icon: LucideIcons.box,
             trailing: trailing,
           ),
           const SizedBox(height: 14),
           _MaterialsTable(data: data, materials: materials),
           const SizedBox(height: 14),
           const _InfoStrip(
-            text:
-                'Verifica que todos los materiales esten cargados y configurados correctamente antes de continuar con la siguiente operacion.',
+            text: 'Verifica que todos los materiales esten cargados y configurados correctamente antes de continuar con la siguiente operacion.',
           ),
         ],
       ),
@@ -905,12 +1197,12 @@ class _InfoStrip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     decoration: BoxDecoration(
       color: PomgtColors.blueSoft.withValues(alpha: .5),
-      borderRadius: PomgtRadii.borderSm,
+      borderRadius: PomgtRadii.borderMd,
       border: Border.all(color: PomgtColors.blue.withValues(alpha: .25)),
     ),
     child: Row(
       children: [
-        const Icon(CupertinoIcons.info_circle_fill, color: PomgtColors.blue, size: 18),
+        const Icon(LucideIcons.info, color: PomgtColors.blue, size: 18),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -977,7 +1269,10 @@ class _MaterialsTable extends StatelessWidget {
                   ),
                   _MaterialTableCell(
                     child: Text(
-                      _materialProduct(data, material)['description']?.toString() ??
+                      _materialProduct(
+                            data,
+                            material,
+                          )['description']?.toString() ??
                           _show(_materialProduct(data, material)['name']),
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
@@ -989,7 +1284,9 @@ class _MaterialsTable extends StatelessWidget {
                     ),
                   ),
                   _MaterialTableCell(
-                    child: Text(UiCopy.enumLabel(_show(material['component_type']))),
+                    child: Text(
+                      UiCopy.enumLabel(_show(material['component_type'])),
+                    ),
                   ),
                   _MaterialTableCell(
                     child: _MaterialSpecs(data: data, material: material),
@@ -1021,7 +1318,7 @@ class _MaterialHeader extends StatelessWidget {
       style: const TextStyle(
         color: PomgtColors.secondaryInk,
         fontSize: 12,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w600,
       ),
     ),
   );
@@ -1055,14 +1352,16 @@ class _MaterialCompactRow extends StatelessWidget {
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       border: Border.all(color: PomgtColors.line),
-      borderRadius: PomgtRadii.borderSm,
+      borderRadius: PomgtRadii.borderMd,
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Expanded(child: _MaterialName(data: data, material: material)),
+            Expanded(
+              child: _MaterialName(data: data, material: material),
+            ),
             const _StatusChip('Listo', success: true),
           ],
         ),
@@ -1093,7 +1392,7 @@ class _MaterialName extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             color: PomgtColors.blue,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 2),
@@ -1105,6 +1404,8 @@ class _MaterialName extends StatelessWidget {
     );
   }
 }
+
+const _materialSpecsInlineLimit = 5;
 
 class _MaterialSpecs extends StatelessWidget {
   const _MaterialSpecs({required this.data, required this.material});
@@ -1121,15 +1422,17 @@ class _MaterialSpecs extends StatelessWidget {
     final materialProductId = material['material_product_id']?.toString();
     final revision = _materialRevision(data, material);
     final attributes = _list(attributeValues[materialProductId]);
-    final specs = _materialSpecPairs(
+    final allSpecs = _materialSpecPairs(
       revision,
       attributes,
       attributeDefinitions,
       units,
-    ).take(5).toList();
+    );
+    final specs = allSpecs.take(_materialSpecsInlineLimit).toList();
     if (specs.isEmpty) {
       return const Text('-', style: TextStyle(color: PomgtColors.muted));
     }
+    final hiddenCount = allSpecs.length - specs.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1139,12 +1442,108 @@ class _MaterialSpecs extends StatelessWidget {
               children: [
                 TextSpan(
                   text: '${spec.label}: ',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 TextSpan(text: spec.value),
               ],
             ),
           ),
+        if (hiddenCount > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: () => showPomgtDialog<void>(
+                context: context,
+                builder: (_) => _MaterialSpecsDialog(
+                  product: _materialProduct(data, material),
+                  specs: allSpecs,
+                ),
+              ),
+              child: Text('Ver más (+$hiddenCount)'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Full specification sheet for a material/component required by a step,
+/// opened from "Ver más" when there are more attributes than fit inline in
+/// the materials table - the operator needs the complete spec to do the
+/// physical setup, not just the first few fields.
+class _MaterialSpecsDialog extends StatelessWidget {
+  const _MaterialSpecsDialog({required this.product, required this.specs});
+
+  final Map<String, dynamic> product;
+  final List<_DisplayField> specs;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 620;
+    return AlertDialog(
+      title: pomgtDialogTitle(context, _show(product['name'])),
+      content: SizedBox(
+        width: compact ? width - 56 : 520,
+        child: ScrollToTopArea(
+          padding: const EdgeInsets.all(12),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _show(product['sku']),
+                  style: const TextStyle(
+                    color: PomgtColors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (specs.isEmpty)
+                  const Text(
+                    'Este material no tiene especificaciones registradas.',
+                    style: TextStyle(color: PomgtColors.muted),
+                  )
+                else
+                  for (final spec in specs)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            spec.label,
+                            style: const TextStyle(
+                              color: PomgtColors.muted,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            spec.value,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cerrar'),
+        ),
       ],
     );
   }
@@ -1212,32 +1611,69 @@ class _OrderInfoPanel extends StatelessWidget {
       order['routing_code'],
       order['routing_revision_code'],
     ].where((v) => v != null && v.toString().trim().isNotEmpty).join(' - ');
+    final items = <Widget>[
+      _OrderInfoLine(
+        'Producto',
+        '${_show(product['sku'])} - ${_show(product['name'])}',
+      ),
+      _OrderInfoLine(
+        'Cliente',
+        _show(
+          customer['trade_name'] ??
+              customer['legal_name'] ??
+              order['customer_name'],
+        ),
+      ),
+      _OrderInfoLine(
+        'Pedido',
+        _show(customerOrder['order_number'] ?? order['order_number']),
+      ),
+      _OrderInfoLine(
+        'OC del cliente',
+        _show(
+          customerOrder['customer_po_number'] ?? order['customer_po_number'],
+        ),
+      ),
+      _OrderInfoLine('Ruta de fabricacion', route.isEmpty ? '-' : route),
+      _OrderInfoLine('Fecha requerida', _dateTime(order['required_at'])),
+      _OrderInfoChipLine(
+        'Prioridad',
+        _StatusChip(UiCopy.enumLabel(_show(order['priority']))),
+      ),
+    ];
     return _OperatorCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _CardTitle('Informacion de la orden', icon: CupertinoIcons.doc_text),
+          const _CardTitle(
+            'Informacion de la orden',
+            icon: LucideIcons.fileText,
+          ),
           const SizedBox(height: 16),
-          _OrderInfoLine('Producto', '${_show(product['sku'])} - ${_show(product['name'])}'),
-          _OrderInfoLine(
-            'Cliente',
-            _show(customer['trade_name'] ?? customer['legal_name'] ?? order['customer_name']),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 760
+                  ? 4
+                  : constraints.maxWidth >= 520
+                  ? 3
+                  : constraints.maxWidth >= 300
+                  ? 2
+                  : 1;
+              final width = constraints.maxWidth / columns;
+              return Wrap(
+                children: [
+                  for (final item in items)
+                    SizedBox(
+                      width: width,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 16),
+                        child: item,
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
-          _OrderInfoLine('Pedido', _show(customerOrder['order_number'] ?? order['order_number'])),
-          _OrderInfoLine('OC del cliente', _show(customerOrder['customer_po_number'] ?? order['customer_po_number'])),
-          _OrderInfoLine('Ruta de fabricacion', route.isEmpty ? '-' : route),
-          _OrderInfoLine('Fecha requerida', _dateTime(order['required_at'])),
-          const SizedBox(height: 4),
-          const Text(
-            'Prioridad',
-            style: TextStyle(
-              color: PomgtColors.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 5),
-          _StatusChip(UiCopy.enumLabel(_show(order['priority']))),
         ],
       ),
     );
@@ -1269,13 +1705,182 @@ class _OrderInfoLine extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.ink,
             fontSize: 13,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
             height: 1.2,
           ),
         ),
       ],
     ),
   );
+}
+
+class _OrderInfoChipLine extends StatelessWidget {
+  const _OrderInfoChipLine(this.label, this.child);
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: PomgtColors.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        child,
+      ],
+    ),
+  );
+}
+
+class _ProductionStartPreview extends StatelessWidget {
+  const _ProductionStartPreview({
+    required this.data,
+    required this.order,
+    required this.busy,
+    required this.onStart,
+  });
+
+  final Map<String, dynamic> data;
+  final Map<String, dynamic> order;
+  final bool busy;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final notes = order['notes']?.toString().trim();
+    final instructions = order['special_instructions']?.toString().trim();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 780;
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            padding: EdgeInsets.fromLTRB(
+              compact ? 14 : 28,
+              compact ? 14 : 22,
+              compact ? 14 : 28,
+              20,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _OrderInfoPanel(data: data),
+                if ((notes != null && notes.isNotEmpty) ||
+                    (instructions != null && instructions.isNotEmpty)) ...[
+                  const SizedBox(height: 12),
+                  _OperatorCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _CardTitle(
+                          'Notas y detalles de la orden',
+                          icon: LucideIcons.fileSearch,
+                        ),
+                        const SizedBox(height: 14),
+                        if (instructions != null &&
+                            instructions.isNotEmpty) ...[
+                          Text(
+                            instructions,
+                            style: const TextStyle(
+                              color: PomgtColors.ink,
+                              fontSize: 13.5,
+                              height: 1.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (notes != null && notes.isNotEmpty)
+                            const SizedBox(height: 12),
+                        ],
+                        if (notes != null && notes.isNotEmpty)
+                          Text(
+                            notes,
+                            style: const TextStyle(
+                              color: PomgtColors.secondaryInk,
+                              fontSize: 13.5,
+                              height: 1.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Column(
+                      children: [
+                        const Icon(
+                          LucideIcons.circlePlay,
+                          size: 54,
+                          color: PomgtColors.blue,
+                        ),
+                        const SizedBox(height: 14),
+                        const Text(
+                          'Esta orden aún no ha iniciado producción',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: PomgtColors.ink,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Revisa los detalles de la orden y confirma para comenzar a registrar los pasos de fabricación.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: PomgtColors.muted,
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          height: PomgtButtonStyle.height,
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: busy ? null : onStart,
+                            icon: busy
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(LucideIcons.play, size: 20),
+                            label: const Text(
+                              'Iniciar producción',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _ProductPreviewPanel extends StatelessWidget {
@@ -1286,14 +1891,16 @@ class _ProductPreviewPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final product = _map(data['product']);
     final materials = _list(data['materials']);
-    final first = materials.isEmpty ? const <String, dynamic>{} : materials.first;
+    final first = materials.isEmpty
+        ? const <String, dynamic>{}
+        : materials.first;
     final revision = _materialRevision(data, first);
     final specs = _productPreviewSpecs(data, first, revision);
     return _OperatorCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _CardTitle('Vista del producto', icon: CupertinoIcons.cube_box),
+          const _CardTitle('Vista del producto', icon: LucideIcons.box),
           const SizedBox(height: 14),
           Center(
             child: Container(
@@ -1302,10 +1909,10 @@ class _ProductPreviewPanel extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: PomgtColors.surfaceAlt.withValues(alpha: .65),
-                borderRadius: PomgtRadii.borderSm,
+                borderRadius: PomgtRadii.borderMd,
               ),
               child: const Icon(
-                Icons.view_carousel_outlined,
+                LucideIcons.panelsTopLeft,
                 color: PomgtColors.muted,
                 size: 58,
               ),
@@ -1317,12 +1924,15 @@ class _ProductPreviewPanel extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.ink,
               fontSize: 14,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            _show(product['description'] ?? UiCopy.enumLabel(_show(product['product_type']))),
+            _show(
+              product['description'] ??
+                  UiCopy.enumLabel(_show(product['product_type'])),
+            ),
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
@@ -1330,8 +1940,7 @@ class _ProductPreviewPanel extends StatelessWidget {
             ),
           ),
           const Divider(height: 24),
-          for (final entry in specs)
-            _OrderInfoLine(entry.key, entry.value),
+          for (final entry in specs) _OrderInfoLine(entry.key, entry.value),
         ],
       ),
     );
@@ -1349,40 +1958,40 @@ class _StepRecords extends StatelessWidget {
     return _OperatorCard(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _CardTitle('Registros del paso', icon: Icons.smart_display_outlined),
-        const SizedBox(height: 12),
-        Table(
-          columnWidths: const {
-            0: FlexColumnWidth(1.2),
-            1: FlexColumnWidth(.9),
-            2: FlexColumnWidth(1.1),
-            3: FlexColumnWidth(2.2),
-          },
-          border: TableBorder.all(color: PomgtColors.line),
-          children: [
-            const TableRow(
-              decoration: BoxDecoration(color: PomgtColors.surfaceAlt),
-              children: [
-                _MaterialHeader('Fecha y hora'),
-                _MaterialHeader('Usuario'),
-                _MaterialHeader('Accion'),
-                _MaterialHeader('Notas'),
-              ],
-            ),
-            for (final row in rows)
-              TableRow(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _CardTitle('Registros del paso', icon: LucideIcons.monitorPlay),
+          const SizedBox(height: 12),
+          Table(
+            columnWidths: const {
+              0: FlexColumnWidth(1.2),
+              1: FlexColumnWidth(.9),
+              2: FlexColumnWidth(1.1),
+              3: FlexColumnWidth(2.2),
+            },
+            border: TableBorder.all(color: PomgtColors.line),
+            children: [
+              const TableRow(
+                decoration: BoxDecoration(color: PomgtColors.surfaceAlt),
                 children: [
-                  _MaterialTableCell(child: Text(row.date)),
-                  _MaterialTableCell(child: Text(row.user)),
-                  _MaterialTableCell(child: Text(row.action)),
-                  _MaterialTableCell(child: Text(row.notes)),
+                  _MaterialHeader('Fecha y hora'),
+                  _MaterialHeader('Usuario'),
+                  _MaterialHeader('Accion'),
+                  _MaterialHeader('Notas'),
                 ],
               ),
-          ],
-        ),
-      ],
+              for (final row in rows)
+                TableRow(
+                  children: [
+                    _MaterialTableCell(child: Text(row.date)),
+                    _MaterialTableCell(child: Text(row.user)),
+                    _MaterialTableCell(child: Text(row.action)),
+                    _MaterialTableCell(child: Text(row.notes)),
+                  ],
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1404,6 +2013,7 @@ class _StepRecord {
 
 class _DisplayActions extends StatelessWidget {
   const _DisplayActions({
+    required this.started,
     required this.busy,
     required this.canBack,
     required this.canForward,
@@ -1412,8 +2022,10 @@ class _DisplayActions extends StatelessWidget {
     required this.onBack,
     required this.onForward,
     required this.onFinish,
+    required this.onStart,
   });
 
+  final bool started;
   final bool busy;
   final bool canBack;
   final bool canForward;
@@ -1422,6 +2034,7 @@ class _DisplayActions extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onForward;
   final VoidCallback onFinish;
+  final VoidCallback onStart;
 
   @override
   Widget build(BuildContext context) {
@@ -1436,17 +2049,50 @@ class _DisplayActions extends StatelessWidget {
           final compact = constraints.maxWidth < 620;
           final backToList = OutlinedButton.icon(
             onPressed: busy ? null : onClose,
-            icon: const Icon(CupertinoIcons.chevron_left, size: 18),
+            icon: const Icon(LucideIcons.chevronLeft, size: 18),
             label: const Text('Volver al listado'),
           );
+          if (!started) {
+            final start = FilledButton.icon(
+              onPressed: busy ? null : onStart,
+              icon: busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(LucideIcons.play, size: 18),
+              label: const Text('Iniciar producción'),
+            );
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(height: PomgtButtonStyle.height, child: backToList),
+                  const SizedBox(height: 8),
+                  SizedBox(height: PomgtButtonStyle.height, child: start),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                backToList,
+                const Spacer(),
+                SizedBox(height: PomgtButtonStyle.height, child: start),
+              ],
+            );
+          }
           final previous = OutlinedButton.icon(
             onPressed: !busy && canBack ? onBack : null,
-            icon: const Icon(CupertinoIcons.chevron_left, size: 18),
+            icon: const Icon(LucideIcons.chevronLeft, size: 18),
             label: const Text('Paso anterior'),
           );
           final next = OutlinedButton.icon(
             onPressed: !busy && canForward ? onForward : null,
-            icon: const Icon(CupertinoIcons.chevron_right, size: 18),
+            icon: const Icon(LucideIcons.chevronRight, size: 18),
             label: const Text('Ver siguiente'),
           );
           final finish = FilledButton.icon(
@@ -1457,7 +2103,7 @@ class _DisplayActions extends StatelessWidget {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.draw_outlined, size: 18),
+                : const Icon(LucideIcons.penTool, size: 18),
             label: const Text('Firmar y continuar'),
           );
 
@@ -1465,13 +2111,13 @@ class _DisplayActions extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(height: 48, child: backToList),
+                SizedBox(height: PomgtButtonStyle.height, child: backToList),
                 const SizedBox(height: 8),
-                SizedBox(height: 48, child: previous),
+                SizedBox(height: PomgtButtonStyle.height, child: previous),
                 const SizedBox(height: 8),
-                SizedBox(height: 48, child: next),
+                SizedBox(height: PomgtButtonStyle.height, child: next),
                 const SizedBox(height: 8),
-                SizedBox(height: 48, child: finish),
+                SizedBox(height: PomgtButtonStyle.height, child: finish),
               ],
             );
           }
@@ -1484,7 +2130,7 @@ class _DisplayActions extends StatelessWidget {
               const SizedBox(width: 10),
               next,
               const SizedBox(width: 10),
-              SizedBox(height: 48, child: finish),
+              SizedBox(height: PomgtButtonStyle.height, child: finish),
             ],
           );
         },
@@ -1531,69 +2177,79 @@ class _OperatorSignatureDialogState extends State<_OperatorSignatureDialog> {
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 620;
     return AlertDialog(
-      title: const Text('Firma de operación'),
+      title: pomgtDialogTitle(context, 'Firma de operación'),
       content: SizedBox(
         width: compact ? width - 56 : 560,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                _show(widget.operation['name']),
-                style: const TextStyle(
-                  color: PomgtColors.muted,
-                  fontWeight: FontWeight.w700,
+        child: ScrollToTopArea(
+          padding: const EdgeInsets.all(12),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  _show(widget.operation['name']),
+                  style: const TextStyle(
+                    color: PomgtColors.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: operatorName,
-                decoration: const InputDecoration(
-                  labelText: 'Operador responsable *',
+                const SizedBox(height: 16),
+                TextField(
+                  controller: operatorName,
+                  decoration: const InputDecoration(
+                    labelText: 'Operador responsable *',
+                    hintText: 'Escribe el nombre del operador',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  SizedBox(
-                    width: compact ? double.infinity : 266,
-                    child: TextField(
-                      controller: completed,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Cantidad buena *',
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 14,
+                  children: [
+                    SizedBox(
+                      width: compact ? double.infinity : 266,
+                      child: TextField(
+                        controller: completed,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: const [ThousandsInputFormatter()],
+                        decoration: const InputDecoration(
+                          labelText: 'Cantidad buena *',
+                          hintText: 'Ej. 100',
+                        ),
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: compact ? double.infinity : 266,
-                    child: TextField(
-                      controller: rejected,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Cantidad rechazada',
+                    SizedBox(
+                      width: compact ? double.infinity : 266,
+                      child: TextField(
+                        controller: rejected,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: const [ThousandsInputFormatter()],
+                        decoration: const InputDecoration(
+                          labelText: 'Cantidad rechazada',
+                          hintText: 'Ej. 0',
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: note,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Observaciones de cierre',
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 14),
+                TextField(
+                  controller: note,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Observaciones de cierre',
+                    hintText: 'Observaciones del cierre…',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1620,7 +2276,7 @@ class _OperatorSignatureDialogState extends State<_OperatorSignatureDialog> {
               ),
             );
           },
-          icon: const Icon(Icons.draw_outlined, size: 17),
+          icon: const Icon(LucideIcons.penTool, size: 17),
           label: const Text('Firmar paso'),
         ),
       ],
@@ -1629,10 +2285,19 @@ class _OperatorSignatureDialogState extends State<_OperatorSignatureDialog> {
 }
 
 class _DisplayError extends StatelessWidget {
-  const _DisplayError({required this.message, required this.onRetry});
+  const _DisplayError({
+    required this.message,
+    required this.onAction,
+    this.actionLabel = 'Reintentar',
+    this.actionIcon = LucideIcons.refreshCw,
+    this.busy = false,
+  });
 
   final String message;
-  final VoidCallback onRetry;
+  final VoidCallback onAction;
+  final String actionLabel;
+  final IconData actionIcon;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -1645,7 +2310,7 @@ class _DisplayError extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                CupertinoIcons.exclamationmark_triangle,
+                LucideIcons.triangleAlert,
                 color: PomgtColors.danger,
                 size: 34,
               ),
@@ -1660,10 +2325,22 @@ class _DisplayError extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(CupertinoIcons.refresh, size: 17),
-                label: const Text('Reintentar'),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  FilledButton.icon(
+                    onPressed: busy ? null : onAction,
+                    icon: Icon(actionIcon, size: 17),
+                    label: Text(busy ? 'Preparando…' : actionLabel),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : () => Navigator.pop(context),
+                    icon: const Icon(LucideIcons.arrowLeft, size: 17),
+                    label: const Text('Regresar al menú'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1712,15 +2389,22 @@ List<Map<String, dynamic>> _linkedMaterials(
   );
   final materials = _list(data['materials']);
   if (links.isEmpty) {
+    // Configured types with no matches must not display the entire BOM.
+    if (operationMaterials.containsKey(
+      operation['routing_operation_id']?.toString(),
+    )) {
+      return [];
+    }
     final operationId = operation['id']?.toString();
     final routingOperationId = operation['routing_operation_id']?.toString();
     final scoped = materials.where((material) {
       final materialOperationId =
           material['operation_id']?.toString() ??
           material['production_operation_id']?.toString();
-      final materialRoutingOperationId =
-          material['routing_operation_id']?.toString();
-      if (operationId != null && materialOperationId == operationId) return true;
+      final materialRoutingOperationId = material['routing_operation_id']
+          ?.toString();
+      if (operationId != null && materialOperationId == operationId)
+        return true;
       if (routingOperationId != null &&
           materialRoutingOperationId == routingOperationId) {
         return true;
@@ -1754,7 +2438,6 @@ List<Map<String, dynamic>> _linkedMaterials(
         };
   }).toList();
 }
-
 
 Map<String, dynamic> _materialProduct(
   Map<String, dynamic> data,
@@ -1875,10 +2558,7 @@ List<MapEntry<String, String>> _productPreviewSpecs(
         product['substrate_type'] ??
         material['substrate_type'],
   );
-  add(
-    'Color',
-    revision['color'] ?? product['color'] ?? material['color'],
-  );
+  add('Color', revision['color'] ?? product['color'] ?? material['color']);
   add(
     'Acabado',
     revision['finish'] ??
@@ -1893,19 +2573,14 @@ List<MapEntry<String, String>> _productPreviewSpecs(
         product['grammage'] ??
         material['grammage'],
   );
-  add(
-    'Ancho',
-    revision['width'] ?? product['width'] ?? material['width'],
-  );
+  add('Ancho', revision['width'] ?? product['width'] ?? material['width']);
   add(
     'Tipo de tinta',
     revision['ink_type'] ?? product['ink_type'] ?? material['ink_type'],
   );
   add(
     'Código de color',
-    revision['color_code'] ??
-        product['color_code'] ??
-        material['color_code'],
+    revision['color_code'] ?? product['color_code'] ?? material['color_code'],
   );
   add(
     'Tecnología de impresión',
@@ -1934,8 +2609,7 @@ List<_StepRecord> _stepRecordRows(
     final eventOperationId =
         event['operation_id']?.toString() ??
         event['production_operation_id']?.toString();
-    final eventRoutingOperationId =
-        event['routing_operation_id']?.toString();
+    final eventRoutingOperationId = event['routing_operation_id']?.toString();
 
     if (operationId != null && eventOperationId == operationId) return true;
     if (routingOperationId != null &&
@@ -1943,8 +2617,8 @@ List<_StepRecord> _stepRecordRows(
       return true;
     }
 
-    final description =
-        '${event['title'] ?? ''} ${event['description'] ?? ''}'.toLowerCase();
+    final description = '${event['title'] ?? ''} ${event['description'] ?? ''}'
+        .toLowerCase();
     if (operationCode != null &&
         operationCode.trim().isNotEmpty &&
         description.contains(operationCode.toLowerCase())) {
@@ -1961,8 +2635,7 @@ List<_StepRecord> _stepRecordRows(
 
   if (events.isNotEmpty) {
     return events.map((event) {
-      final action =
-          event['title']?.toString().trim().isNotEmpty == true
+      final action = event['title']?.toString().trim().isNotEmpty == true
           ? event['title'].toString()
           : UiCopy.enumLabel(
               event['new_status']?.toString() ??
@@ -2027,7 +2700,7 @@ List<_DisplayField> _materialSpecPairs(
     fields.add(_DisplayField(label, text));
   }
 
-  add('Revision', revision['revision_code'] ?? revision['revision']);
+  add('Versión', revision['revision_code'] ?? revision['revision']);
   add('Lote', revision['lot_number']);
   for (final attribute in attributes) {
     final definition = _map(
@@ -2071,11 +2744,13 @@ double _n(dynamic value) {
 
 String _fmt(dynamic value) {
   final n = _n(value);
-  if (n == n.roundToDouble()) return n.toInt().toString();
-  return n
-      .toStringAsFixed(4)
-      .replaceFirst(RegExp(r'0+$'), '')
-      .replaceFirst(RegExp(r'\.$'), '');
+  if (n == n.roundToDouble()) return formatNumberText(n.toInt());
+  return formatNumberText(
+    n
+        .toStringAsFixed(4)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), ''),
+  );
 }
 
 String _show(dynamic value) =>

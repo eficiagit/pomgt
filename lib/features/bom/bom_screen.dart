@@ -1,19 +1,30 @@
-import 'package:flutter/cupertino.dart';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/widgets/number_input.dart';
+import '../../core/widgets/categorized_picker.dart';
+import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/entity_crud_panel.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../core/widgets/record_workspace.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/bom_repository.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
+import '../../core/widgets/section_title.dart';
 
 class BomScreen extends StatefulWidget {
   const BomScreen({super.key});
@@ -37,9 +48,9 @@ class _BomTitle extends StatelessWidget {
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
+              const SectionTitle(
                 'Estructuras de fabricación',
-                style: Theme.of(context).textTheme.headlineMedium,
+                icon: LucideIcons.layers,
               ),
               const InfoTip(
                 'Define materiales, subensambles, consumibles y empaques para fabricar cada producto.',
@@ -62,7 +73,7 @@ class _BomTitle extends StatelessWidget {
       );
       final button = FilledButton.icon(
         onPressed: onCreate,
-        icon: const Icon(CupertinoIcons.add, size: 18),
+        icon: const Icon(LucideIcons.plus, size: 18),
         label: const Text('Nueva estructura de fabricación'),
       );
 
@@ -141,7 +152,7 @@ class _BomList extends StatelessWidget {
                         onChanged: onSearch,
                         decoration: const InputDecoration(
                           hintText: 'Buscar estructura o producto',
-                          prefixIcon: Icon(CupertinoIcons.search, size: 20),
+                          prefixIcon: Icon(LucideIcons.search, size: 20),
                           prefixIconConstraints: BoxConstraints(minWidth: 46),
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 18,
@@ -154,7 +165,7 @@ class _BomList extends StatelessWidget {
                   IconButton(
                     tooltip: 'Actualizar',
                     onPressed: onRefresh,
-                    icon: const Icon(CupertinoIcons.refresh, size: 18),
+                    icon: const Icon(LucideIcons.refreshCw, size: 18),
                   ),
                 ],
               ),
@@ -172,15 +183,13 @@ class _BomList extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 12,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 8),
               Expanded(
                 child: loading
-                    ? const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const PomgtLoading()
                     : rows.isEmpty
                     ? const Center(
                         child: Text(
@@ -188,40 +197,40 @@ class _BomList extends StatelessWidget {
                           style: TextStyle(color: PomgtColors.muted),
                         ),
                       )
-                    : ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        itemCount: rows.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final row = rows[index];
-                          final selected = row['id']?.toString() == selectedId;
-                          final active = row['is_active'] == true;
-                          return InkWell(
-                            borderRadius: PomgtRadii.borderSm,
-                            onTap: () => onSelect(row['id']?.toString()),
-                            child: Container(
+                    : ScrollToTopArea(
+                        padding: const EdgeInsets.all(10),
+                        builder: (context, controller) => PomgtListView.separated(
+                          controller: controller,
+                          padding: const EdgeInsets.only(bottom: 8),
+                          itemCount: rows.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final row = rows[index];
+                            final selected =
+                                row['id']?.toString() == selectedId;
+                            final active = row['is_active'] == true;
+                            return SmoothHover(
+                              selected: selected,
+                              selectedColor: PomgtColors.navySelected,
+                              hoverColor: PomgtColors.surfaceAlt.withValues(
+                                alpha: .55,
+                              ),
+                              borderColor: selected
+                                  ? PomgtColors.navySelectedBorder
+                                  : PomgtColors.line,
+                              lift: .2,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
                                 vertical: 12,
                               ),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? PomgtColors.navySelected
-                                    : PomgtColors.canvas,
-                                borderRadius: PomgtRadii.borderSm,
-                                border: Border.all(
-                                  color: selected
-                                      ? PomgtColors.navySelectedBorder
-                                      : PomgtColors.line,
-                                ),
-                              ),
+                              onTap: () => onSelect(row['id']?.toString()),
                               child: Row(
                                 children: [
                                   const SizedBox(
                                     width: 30,
                                     height: 30,
                                     child: Icon(
-                                      CupertinoIcons.square_stack_3d_up,
+                                      LucideIcons.layers,
                                       size: 17,
                                       color: PomgtColors.ink,
                                     ),
@@ -238,7 +247,7 @@ class _BomList extends StatelessWidget {
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
                                             fontSize: 12.5,
-                                            fontWeight: FontWeight.w900,
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
                                         const SizedBox(height: 4),
@@ -263,6 +272,9 @@ class _BomList extends StatelessWidget {
                                     ),
                                   ),
                                   PopupMenuButton<String>(
+                                    popUpAnimationStyle: PomgtMotion.style(
+                                      context,
+                                    ),
                                     tooltip: 'Acciones',
                                     padding: EdgeInsets.zero,
                                     onSelected: (value) {
@@ -274,10 +286,7 @@ class _BomList extends StatelessWidget {
                                         value: 'edit',
                                         child: Row(
                                           children: [
-                                            Icon(
-                                              CupertinoIcons.pencil,
-                                              size: 17,
-                                            ),
+                                            Icon(LucideIcons.pencil, size: 17),
                                             SizedBox(width: 9),
                                             Text('Editar'),
                                           ],
@@ -288,7 +297,7 @@ class _BomList extends StatelessWidget {
                                         child: Row(
                                           children: [
                                             Icon(
-                                              CupertinoIcons.trash,
+                                              LucideIcons.trash2,
                                               size: 17,
                                               color: PomgtColors.danger,
                                             ),
@@ -306,7 +315,7 @@ class _BomList extends StatelessWidget {
                                     child: const Padding(
                                       padding: EdgeInsets.all(8),
                                       child: Icon(
-                                        CupertinoIcons.ellipsis_vertical,
+                                        LucideIcons.ellipsisVertical,
                                         size: 17,
                                         color: PomgtColors.muted,
                                       ),
@@ -314,9 +323,9 @@ class _BomList extends StatelessWidget {
                                   ),
                                 ],
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
               ),
             ],
@@ -343,12 +352,12 @@ class _BomFilter extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 11.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
               color: PomgtColors.secondaryInk,
             ),
           ),
         ),
-        const Icon(CupertinoIcons.chevron_down, size: 12),
+        const Icon(LucideIcons.chevronDown, size: 12),
       ],
     ),
   );
@@ -373,7 +382,7 @@ class _BomOverview extends StatelessWidget {
       future: _load(generic, lookups, id),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+          return const PomgtLoading();
         final data = snapshot.data ?? const {};
         final revisions =
             data['revisions'] as List<Map<String, dynamic>>? ?? const [];
@@ -384,91 +393,85 @@ class _BomOverview extends StatelessWidget {
         final items = data['items'] as List<Map<String, dynamic>>? ?? const [];
         final documents =
             data['documents'] as List<Map<String, dynamic>>? ?? const [];
-        final substitutes =
-            data['substitutes'] as List<Map<String, dynamic>>? ?? const [];
         final products =
             data['products'] as List<Map<String, dynamic>>? ?? const [];
         final units = data['units'] as List<Map<String, dynamic>>? ?? const [];
-        return SingleChildScrollView(
-          child: Column(
-            children: [
-              _BomHero(
-                bom: bom,
-                onEdit: onEdit,
-                onDuplicate: () => _duplicate(context, data),
-                onCreateRevision: () => _createRevision(context),
-              ),
-              const SizedBox(height: 12),
-              _BomKpis(
-                bom: bom,
-                revision: revision,
-                items: items,
-                revisions: revisions.length,
-              ),
-              const SizedBox(height: 12),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final left = Column(
-                    children: [
-                      _BomComponents(
-                        rows: items,
-                        revision: revision,
-                        products: products,
-                        units: units,
-                        lookups: lookups,
-                        onAdd: revision == null
-                            ? null
-                            : () => _createItem(context, revision, products),
-                      ),
-                      const SizedBox(height: 12),
-                      _BomImpact(items: items),
-                    ],
-                  );
-                  final right = Column(
-                    children: [
-                      _BomSubstitutes(
-                        rows: substitutes,
-                        products: products,
-                        lookups: lookups,
-                        onShowAll: substitutes.isEmpty
-                            ? null
-                            : () => _showSubstitutes(context, products),
-                      ),
-                      const SizedBox(height: 12),
-                      _BomRevisions(
-                        rows: revisions,
-                        onShowHistory: revisions.isEmpty
-                            ? null
-                            : () => _showRevisions(context),
-                      ),
-                      const SizedBox(height: 12),
-                      _BomDocuments(
-                        rows: documents,
-                        revision: revision,
-                        onShowAll: documents.isEmpty || revision == null
-                            ? null
-                            : () => _showDocuments(context, revision),
-                      ),
-                    ],
-                  );
-                  if (constraints.maxWidth < 860) {
-                    return Column(
-                      children: [left, const SizedBox(height: 12), right],
+        return ScrollToTopArea(
+          padding: const EdgeInsets.all(16),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _BomHero(
+                  bom: bom,
+                  onEdit: onEdit,
+                  onDuplicate: () => _duplicate(context, data),
+                  onCreateRevision: () => _createRevision(context),
+                ),
+                const SizedBox(height: 12),
+                _BomKpis(
+                  bom: bom,
+                  revision: revision,
+                  items: items,
+                  revisions: revisions.length,
+                ),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final left = Column(
+                      children: [
+                        _BomComponents(
+                          rows: items,
+                          revision: revision,
+                          products: products,
+                          units: units,
+                          lookups: lookups,
+                          onAdd: revision == null
+                              ? null
+                              : () => _createItem(context, revision, products),
+                        ),
+                        const SizedBox(height: 12),
+                        _BomImpact(items: items),
+                      ],
                     );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(flex: 7, child: left),
-                      const SizedBox(width: 12),
-                      Expanded(flex: 4, child: right),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              _BomActions(id: id, bom: bom),
-            ],
+                    final right = Column(
+                      children: [
+                        _BomRevisions(
+                          rows: revisions,
+                          onShowHistory: revisions.isEmpty
+                              ? null
+                              : () => _showRevisions(context),
+                        ),
+                        const SizedBox(height: 12),
+                        _BomDocuments(
+                          rows: documents,
+                          revision: revision,
+                          onShowAll: documents.isEmpty || revision == null
+                              ? null
+                              : () => _showDocuments(context, revision),
+                        ),
+                      ],
+                    );
+                    if (constraints.maxWidth < 860) {
+                      return Column(
+                        children: [left, const SizedBox(height: 12), right],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 7, child: left),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 4, child: right),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                _BomActions(id: id, bom: bom),
+              ],
+            ),
           ),
         );
       },
@@ -476,7 +479,7 @@ class _BomOverview extends StatelessWidget {
   }
 
   Future<void> _createRevision(BuildContext context) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -484,8 +487,8 @@ class _BomOverview extends StatelessWidget {
         repository: context.read<GenericRepository>(),
         lookups: context.read<LookupRepository>(),
         fixedValues: {'bom_id': bom['id']},
-        title: 'Nueva revisión',
-        icon: CupertinoIcons.clock,
+        title: 'Nueva versión',
+        icon: LucideIcons.clock,
       ),
     );
     if (changed == true && context.mounted) onChanged();
@@ -497,7 +500,7 @@ class _BomOverview extends StatelessWidget {
     List<Map<String, dynamic>> products,
   ) async {
     final materialRows = _materialComponentRows(products);
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -507,23 +510,23 @@ class _BomOverview extends StatelessWidget {
         fixedValues: {'bom_revision_id': revision['id']},
         referenceRows: {'component_product_id': materialRows},
         title: 'Nuevo material / componente',
-        icon: CupertinoIcons.square_grid_2x2,
+        icon: LucideIcons.layoutGrid,
       ),
     );
     if (changed == true && context.mounted) onChanged();
   }
 
   Future<void> _showRevisions(BuildContext context) async {
-    await showDialog<void>(
+    await showPomgtDialog<void>(
       context: context,
       builder: (_) => _BomCrudDialog(
-        title: 'Historial de revisiones',
+        title: 'Historial de versiones',
         child: EntityCrudPanel(
           table: 'bom_revisions',
           repository: context.read<GenericRepository>(),
           lookups: context.read<LookupRepository>(),
           fixedValues: {'bom_id': bom['id']},
-          title: 'Revisiones de la estructura',
+          title: 'Versiones de la estructura',
           description: 'Versiones históricas o vigentes de esta estructura.',
           flatList: true,
           onChanged: onChanged,
@@ -537,7 +540,7 @@ class _BomOverview extends StatelessWidget {
     BuildContext context,
     Map<String, dynamic> revision,
   ) async {
-    await showDialog<void>(
+    await showPomgtDialog<void>(
       context: context,
       builder: (_) => _BomCrudDialog(
         title: 'Documentos vinculados',
@@ -547,27 +550,8 @@ class _BomOverview extends StatelessWidget {
           lookups: context.read<LookupRepository>(),
           fixedValues: {'bom_revision_id': revision['id']},
           title: 'Documentos',
-          description: 'Documentos relacionados con esta revisión.',
+          description: 'Documentos relacionados con esta versión.',
           onChanged: onChanged,
-        ),
-      ),
-    );
-    if (context.mounted) onChanged();
-  }
-
-  Future<void> _showSubstitutes(
-    BuildContext context,
-    List<Map<String, dynamic>> products,
-  ) async {
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _BomCrudDialog(
-        title: 'Sustitutos',
-        child: _BomSubstitutesPanel(
-          bomId: bom['id'].toString(),
-          repository: context.read<GenericRepository>(),
-          lookups: context.read<LookupRepository>(),
-          materialRows: _materialComponentRows(products),
         ),
       ),
     );
@@ -596,20 +580,22 @@ class _BomOverview extends StatelessWidget {
         data['itemsByRevision'] as Map<String, List<Map<String, dynamic>>>? ??
         const {};
     for (final revision in revisions) {
-      final newRevision = await generic
-          .createRow(Phase1Schema.tables['bom_revisions']!, {
-            'bom_id': createdBom['id'],
-            'revision_code': revision['revision_code'],
-            'status': revision['status'],
-            'output_quantity': revision['output_quantity'],
-            'output_uom_id': revision['output_uom_id'],
-            'expected_scrap_pct': revision['expected_scrap_pct'],
-            'expected_yield_pct': revision['expected_yield_pct'],
-            'effective_from': revision['effective_from'],
-            'effective_to': revision['effective_to'],
-            'approval_status': revision['approval_status'],
-            'notes': revision['notes'],
-          });
+      final newRevision = await generic.createRow(
+        Phase1Schema.tables['bom_revisions']!,
+        {
+          'bom_id': createdBom['id'],
+          'revision_code': revision['revision_code'],
+          'status': revision['status'],
+          'output_quantity': revision['output_quantity'],
+          'output_uom_id': revision['output_uom_id'],
+          'expected_scrap_pct': revision['expected_scrap_pct'],
+          'expected_yield_pct': revision['expected_yield_pct'],
+          'effective_from': revision['effective_from'],
+          'effective_to': revision['effective_to'],
+          'approval_status': revision['approval_status'],
+          'notes': revision['notes'],
+        },
+      );
       for (final item
           in itemsByRevision[revision['id']?.toString()] ??
               const <Map<String, dynamic>>[]) {
@@ -674,15 +660,6 @@ class _BomOverview extends StatelessWidget {
             Phase1Schema.tables['document_links']!,
             filters: {'bom_revision_id': active['id']},
           );
-    final substitutes = <Map<String, dynamic>>[];
-    for (final item in items) {
-      substitutes.addAll(
-        await generic.listRows(
-          Phase1Schema.tables['bom_item_substitutes']!,
-          filters: {'bom_item_id': item['id']},
-        ),
-      );
-    }
     final products = await lookups.rows('products');
     final units = await lookups.rows('units_of_measure');
     return {
@@ -690,7 +667,6 @@ class _BomOverview extends StatelessWidget {
       'items': items,
       'itemsByRevision': itemsByRevision,
       'documents': documents,
-      'substitutes': substitutes,
       'products': products,
       'units': units,
     };
@@ -737,7 +713,7 @@ class _BomHero extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 20,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                       color: PomgtColors.ink,
                     ),
                   ),
@@ -765,18 +741,18 @@ class _BomHero extends StatelessWidget {
           children: [
             TextButton.icon(
               onPressed: onEdit,
-              icon: const Icon(CupertinoIcons.pencil, size: 16),
+              icon: const Icon(LucideIcons.pencil, size: 16),
               label: const Text('Editar'),
             ),
             TextButton.icon(
               onPressed: onDuplicate,
-              icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
+              icon: const Icon(LucideIcons.files, size: 16),
               label: const Text('Duplicar'),
             ),
             TextButton.icon(
               onPressed: onCreateRevision,
-              icon: const Icon(CupertinoIcons.add_circled, size: 16),
-              label: const Text('Nueva revisión'),
+              icon: const Icon(LucideIcons.circlePlus, size: 16),
+              label: const Text('Nueva versión'),
             ),
           ],
         );
@@ -808,27 +784,30 @@ class _BomStatus extends StatelessWidget {
   const _BomStatus({required this.active});
   final bool active;
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 7,
-        height: 7,
-        decoration: BoxDecoration(
-          color: active ? PomgtColors.mint : PomgtColors.amber,
-          shape: BoxShape.circle,
+  Widget build(BuildContext context) => PomgtAnimatedValue(
+    value: active,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: active ? PomgtColors.mint : PomgtColors.amber,
+            shape: BoxShape.circle,
+          ),
         ),
-      ),
-      const SizedBox(width: 5),
-      Text(
-        active ? 'Activa' : 'Inactiva',
-        style: TextStyle(
-          color: active ? PomgtColors.mint : PomgtColors.amber,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
+        const SizedBox(width: 5),
+        Text(
+          active ? 'Activa' : 'Inactiva',
+          style: TextStyle(
+            color: active ? PomgtColors.mint : PomgtColors.amber,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
@@ -847,23 +826,23 @@ class _BomKpis extends StatelessWidget {
   Widget build(BuildContext context) {
     final values = [
       (
-        'Revisión activa',
+        'Versión activa',
         revision?['revision_code']?.toString() ?? '—',
-        CupertinoIcons.checkmark_circle,
+        LucideIcons.circleCheck,
       ),
       (
         'Cantidad base',
         '${revision?['output_quantity'] ?? '—'}',
-        CupertinoIcons.arrow_up_right,
+        LucideIcons.arrowUpRight,
       ),
-      ('Componentes', '${items.length}', CupertinoIcons.square_stack_3d_up),
-      ('Costo estimado', '—', CupertinoIcons.money_dollar_circle),
+      ('Componentes', '${items.length}', LucideIcons.layers),
+      ('Costo estimado', '—', LucideIcons.circleDollarSign),
       (
         'Merma estimada',
         '${revision?['expected_scrap_pct'] ?? 0}%',
-        CupertinoIcons.percent,
+        LucideIcons.percent,
       ),
-      ('Revisiones', '$revisions', CupertinoIcons.clock),
+      ('Versiones', '$revisions', LucideIcons.clock),
     ];
     return SizedBox(
       width: double.infinity,
@@ -939,7 +918,7 @@ class _BomKpi extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 15,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               Text(
@@ -949,7 +928,7 @@ class _BomKpi extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 10.5,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -1028,7 +1007,7 @@ class _BomComponents extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _BomSection(
     title: 'Materiales y componentes',
-    icon: CupertinoIcons.square_grid_2x2,
+    icon: LucideIcons.layoutGrid,
     link: 'Agregar material',
     onLinkTap: onAdd,
     child: rows.isEmpty
@@ -1036,7 +1015,7 @@ class _BomComponents extends StatelessWidget {
             height: 120,
             child: Center(
               child: Text(
-                'Agrega materiales o subensambles a esta revisión.',
+                'Agrega materiales o subensambles a esta versión.',
                 style: TextStyle(color: PomgtColors.muted),
               ),
             ),
@@ -1079,71 +1058,26 @@ class _BomComponents extends StatelessWidget {
   );
 }
 
-class _BomSubstitutes extends StatelessWidget {
-  const _BomSubstitutes({
-    required this.rows,
-    required this.products,
-    required this.lookups,
-    required this.onShowAll,
-  });
-  final List<Map<String, dynamic>> rows;
-  final List<Map<String, dynamic>> products;
-  final LookupRepository lookups;
-  final VoidCallback? onShowAll;
-
-  String _productName(dynamic id) => _lookupDisplay(
-    products,
-    id,
-    Phase1Schema.tables['products']!,
-    lookups,
-    fallback: 'Material sustituto',
-  );
-
-  @override
-  Widget build(BuildContext context) => _BomSection(
-    title: 'Sustitutos y cobertura',
-    icon: CupertinoIcons.arrow_2_squarepath,
-    link: rows.isEmpty ? null : 'Ver todos los sustitutos (${rows.length})',
-    onLinkTap: onShowAll,
-    child: rows.isEmpty
-        ? const _BomLine(
-            'Sustitutos',
-            'Sin sustitutos configurados',
-            color: PomgtColors.muted,
-          )
-        : Column(
-            children: [
-              for (final row in rows.take(5))
-                _BomLine(
-                  'Alternativa ${row['priority'] ?? '—'}',
-                  _productName(row['substitute_product_id']),
-                  color: PomgtColors.mint,
-                ),
-            ],
-          ),
-  );
-}
-
 class _BomRevisions extends StatelessWidget {
   const _BomRevisions({required this.rows, required this.onShowHistory});
   final List<Map<String, dynamic>> rows;
   final VoidCallback? onShowHistory;
   @override
   Widget build(BuildContext context) => _BomSection(
-    title: 'Revisiones',
-    icon: CupertinoIcons.clock,
+    title: 'Versiones',
+    icon: LucideIcons.clock,
     link: rows.isEmpty ? null : 'Ver historial',
     onLinkTap: onShowHistory,
     child: rows.isEmpty
         ? const Text(
-            'Sin revisiones.',
+            'Sin versiones.',
             style: TextStyle(color: PomgtColors.muted),
           )
         : Column(
             children: [
               for (final row in rows.take(4))
                 _BomLine(
-                  row['revision_code']?.toString() ?? 'Revisión',
+                  row['revision_code']?.toString() ?? 'Versión',
                   UiCopy.enumLabel(row['status']?.toString() ?? ''),
                   color: row['status'] == 'active'
                       ? PomgtColors.blue
@@ -1166,7 +1100,7 @@ class _BomDocuments extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _BomSection(
     title: 'Documentos vinculados',
-    icon: CupertinoIcons.doc_text,
+    icon: LucideIcons.fileText,
     link: rows.isEmpty ? null : 'Ver todos',
     onLinkTap: onShowAll,
     child: rows.isEmpty
@@ -1192,7 +1126,7 @@ class _BomImpact extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _BomSection(
     title: 'Impacto en producción',
-    icon: CupertinoIcons.chart_bar,
+    icon: LucideIcons.chartColumn,
     child: LayoutBuilder(
       builder: (context, constraints) {
         final itemWidth = constraints.maxWidth >= 620
@@ -1207,7 +1141,7 @@ class _BomImpact extends StatelessWidget {
             SizedBox(
               width: itemWidth,
               child: _BomImpactValue(
-                CupertinoIcons.cube_box,
+                LucideIcons.box,
                 '${items.length}',
                 'Componentes ligados',
               ),
@@ -1215,7 +1149,7 @@ class _BomImpact extends StatelessWidget {
             SizedBox(
               width: itemWidth,
               child: _BomImpactValue(
-                CupertinoIcons.cart,
+                LucideIcons.shoppingCart,
                 '—',
                 'Órdenes relacionadas',
               ),
@@ -1223,14 +1157,14 @@ class _BomImpact extends StatelessWidget {
             SizedBox(
               width: itemWidth,
               child: _BomImpactValue(
-                CupertinoIcons.calendar,
+                LucideIcons.calendar,
                 '—',
                 'Última actualización',
               ),
             ),
             SizedBox(
               width: itemWidth,
-              child: _BomImpactValue(CupertinoIcons.person, '—', 'Responsable'),
+              child: _BomImpactValue(LucideIcons.user, '—', 'Responsable'),
             ),
           ],
         );
@@ -1255,7 +1189,7 @@ class _BomImpactValue extends StatelessWidget {
           children: [
             Text(
               value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             Text(
               label,
@@ -1292,17 +1226,17 @@ class _BomActions extends StatelessWidget {
         );
         return _BomPanel(
           flat: true,
-          child: DefaultTabController(
-            length: 4,
+          child: PomgtTabController(
+            length: 3,
             child: Column(
               children: [
                 const TabBar(
                   isScrollable: true,
+                  tabAlignment: TabAlignment.start,
                   tabs: [
                     Tab(text: 'General'),
-                    Tab(text: 'Revisiones'),
+                    Tab(text: 'Versiones'),
                     Tab(text: 'Materiales y componentes'),
-                    Tab(text: 'Sustitutos'),
                   ],
                 ),
                 SizedBox(
@@ -1320,14 +1254,13 @@ class _BomActions extends StatelessWidget {
                           repository: generic,
                           lookups: lookups,
                           fixedValues: {'bom_id': id},
-                          title: 'Revisiones de la estructura',
+                          title: 'Versiones de la estructura',
                           flatList: true,
                         ),
                       ),
                       NestedRelationPanel(
-                        title: 'Materiales por revisión',
-                        help:
-                            'Administra materiales, subensambles, cantidades, merma y rendimiento.',
+                        title: 'Materiales por versión',
+                        help: 'Administra materiales, subensambles, cantidades, merma y rendimiento.',
                         parentTable: 'bom_revisions',
                         parentFilter: {'bom_id': id},
                         repository: generic,
@@ -1344,12 +1277,6 @@ class _BomActions extends StatelessWidget {
                             help: 'Componentes de la estructura.',
                           ),
                         ],
-                      ),
-                      _BomSubstitutesPanel(
-                        bomId: id,
-                        repository: generic,
-                        lookups: lookups,
-                        materialRows: materialRows,
                       ),
                     ],
                   ),
@@ -1397,7 +1324,7 @@ class _BomSection extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 14,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                         color: PomgtColors.ink,
                       ),
                     ),
@@ -1420,7 +1347,7 @@ class _BomSection extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 11.5,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -1446,16 +1373,12 @@ class _BomPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: padding,
-    decoration: flat
-        ? const BoxDecoration(color: PomgtColors.canvas)
-        : BoxDecoration(
-            color: PomgtColors.canvas,
-            borderRadius: PomgtRadii.borderMd,
-            border: Border.all(
-              color: PomgtColors.lineStrong.withValues(alpha: .55),
-            ),
-            boxShadow: PomgtShadows.card,
-          ),
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      color: PomgtColors.canvas,
+      borderRadius: PomgtRadii.borderMd,
+      border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .55)),
+    ),
     child: child,
   );
 }
@@ -1494,15 +1417,14 @@ class _BomCrudDialog extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
                   IconButton(
                     tooltip: 'Cerrar',
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(CupertinoIcons.xmark, size: 20),
+                    icon: const Icon(LucideIcons.x, size: 20),
                   ),
                 ],
               ),
@@ -1545,7 +1467,7 @@ class _BomLine extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontSize: 11.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -1567,7 +1489,7 @@ TableRow _bomHeader(List<String> values) => TableRow(
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 10,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -1628,7 +1550,7 @@ class _BomScreenState extends State<BomScreen> {
   }
 
   Future<void> _create() async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const _BomCreateDialog(),
@@ -1640,7 +1562,7 @@ class _BomScreenState extends State<BomScreen> {
   }
 
   Future<void> _edit(Map<String, dynamic> row) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -1657,12 +1579,20 @@ class _BomScreenState extends State<BomScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> row) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Eliminar estructura de fabricación'),
-        content: const Text(
-          'Esta acción no se puede deshacer. Los registros relacionados pueden impedir la eliminación para proteger la trazabilidad.',
+        title: pomgtDialogTitle(
+          context,
+          'Eliminar estructura de fabricación',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text(
+            'Se eliminarán también sus versiones, componentes y documentos ligados. Esta acción no se puede deshacer.\n\n'
+            'Si ya se usó para preparar una orden de producción, no podrá eliminarse.',
+          ),
         ),
         actions: [
           TextButton(
@@ -1671,24 +1601,30 @@ class _BomScreenState extends State<BomScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar'),
+            style: FilledButton.styleFrom(backgroundColor: PomgtColors.danger),
+            child: const Text('Eliminar definitivamente'),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
     try {
-      await context.read<GenericRepository>().deleteRow(
-        Phase1Schema.tables['boms']!,
-        row,
-      );
+      await context.read<BomRepository>().deleteBom(row['id'].toString());
       if (!mounted) return;
       setState(() => selectedId = null);
       context.read<BomController>().refresh();
       _reload();
+      showPomgtSnackBar(context, 'Estructura de fabricación eliminada.');
     } catch (error) {
       if (!mounted) return;
-      showPomgtSnackBar(context, error.toString(), isError: true);
+      showPomgtSnackBar(
+        context,
+        ErrorCopy.message(
+          error,
+          fallback: 'No fue posible eliminar la estructura de fabricación.',
+        ),
+        isError: true,
+      );
     }
   }
 
@@ -1758,11 +1694,11 @@ class _BomScreenState extends State<BomScreen> {
                     );
                     final detail = selected == null
                         ? const _BomPanel(
-                            child: Center(
-                              child: Text(
-                                'Selecciona una estructura para ver su expediente.',
-                                style: TextStyle(color: PomgtColors.muted),
-                              ),
+                            child: EmptyState(
+                              icon: LucideIcons.layers,
+                              title: 'Selecciona una estructura',
+                              message:
+                                  'Su expediente y relaciones aparecerán aquí.',
                             ),
                           )
                         : _BomOverview(
@@ -1814,13 +1750,14 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
   final code = TextEditingController();
   final name = TextEditingController();
   final description = TextEditingController();
-  final revision = TextEditingController(text: 'Rev. 01');
+  final revision = TextEditingController(text: 'V.01');
   final quantity = TextEditingController(text: '1');
   String? productId;
   String? outputUomId;
   bool isDefault = true;
   bool saving = false;
   late Future<List<List<Map<String, dynamic>>>> future;
+  final List<Map<String, dynamic>> extraUnits = [];
 
   LookupRepository get lookups => context.read<LookupRepository>();
   GenericRepository get generic => context.read<GenericRepository>();
@@ -1846,7 +1783,7 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
 
   Future<void> _createProduct() async {
     Map<String, dynamic>? created;
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -1860,9 +1797,6 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
           'product_type',
         },
         fixedValues: const {'product_type': 'finished_good'},
-        referenceFilters: const {
-          'product_type_catalog_id': {'system_class': 'finished_good'},
-        },
         afterSaved: (saved) async {
           if (saved['id'] == null || saved['product_type'] == 'finished_good') {
             return;
@@ -1964,296 +1898,306 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
               final products = data[0]
                   .where((p) => p['is_manufacturable'] == true)
                   .toList();
-              final units = data[1];
+              final units = [...data[1], ...extraUnits];
               return Form(
                 key: formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 10,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          const Icon(
-                            CupertinoIcons.square_stack_3d_up,
-                            size: 25,
-                            color: PomgtColors.blue,
-                          ),
-                          const SizedBox(width: 12),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 220,
-                              maxWidth: 620,
+                child: ScrollToTopArea(
+                  padding: const EdgeInsets.all(12),
+                  builder: (context, controller) => SingleChildScrollView(
+                    controller: controller,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              LucideIcons.layers,
+                              size: 25,
+                              color: PomgtColors.ink,
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Nueva estructura de fabricación',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.headlineSmall,
-                                ),
-                                const SizedBox(height: 5),
-                                const Text(
-                                  'Crea la estructura y su primera revisión. Después podrás agregar materiales, subensambles y sustitutos.',
-                                  style: TextStyle(color: PomgtColors.muted),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Cerrar',
-                            onPressed: () => Navigator.pop(context),
-                            icon: const Icon(CupertinoIcons.xmark, size: 20),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      const Divider(height: 1),
-                      const SizedBox(height: 20),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue:
-                                  products.any(
-                                    (p) => p['id']?.toString() == productId,
-                                  )
-                                  ? productId
-                                  : null,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Producto *',
-                                helperText:
-                                    'Solo se muestran productos marcados como fabricables.',
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Nueva estructura de fabricación',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineSmall,
+                                  ),
+                                  const SizedBox(height: 5),
+                                  const Text(
+                                    'Crea la estructura y su primera versión. Después podrás agregar materiales, subensambles y sustitutos.',
+                                    style: TextStyle(color: PomgtColors.muted),
+                                  ),
+                                ],
                               ),
-                              items: products
-                                  .map(
-                                    (p) => DropdownMenuItem(
-                                      value: p['id'].toString(),
-                                      child: Text(
-                                        lookups.display(
-                                          Phase1Schema.tables['products']!,
-                                          p,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) => _selectProduct(v, products),
-                              validator: (v) =>
-                                  v == null ? 'Selecciona un producto' : null,
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Tooltip(
-                            message: 'Agregar producto',
-                            child: IconButton(
+                            IconButton(
+                              tooltip: 'Cerrar',
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(LucideIcons.x, size: 20),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        const Divider(height: 1),
+                        const SizedBox(height: 20),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: CategorizedSearchPicker(
+                                label: 'Producto *',
+                                hint: 'Buscar producto…',
+                                helperText: 'Solo se muestran productos marcados como fabricables.',
+                                value:
+                                    products.any(
+                                      (p) => p['id']?.toString() == productId,
+                                    )
+                                    ? productId
+                                    : null,
+                                items: [
+                                  for (final p in products)
+                                    PickerItem(
+                                      id: p['id'].toString(),
+                                      label: lookups.display(
+                                        Phase1Schema.tables['products']!,
+                                        p,
+                                      ),
+                                      category: 'Productos',
+                                    ),
+                                ],
+                                onChanged: (v) => _selectProduct(v, products),
+                                validator: (v) =>
+                                    v == null ? 'Selecciona un producto' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Tooltip(
+                              message: 'Agregar producto',
+                              child: IconButton(
+                                onPressed: _createProduct,
+                                icon: const Icon(LucideIcons.plus, size: 19),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (products.isEmpty &&
+                            snapshot.connectionState !=
+                                ConnectionState.waiting) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
                               onPressed: _createProduct,
-                              icon: const Icon(CupertinoIcons.add, size: 19),
+                              icon: const Icon(LucideIcons.plus, size: 16),
+                              label: const Text('Agregar el primer producto'),
                             ),
                           ),
                         ],
-                      ),
-                      if (products.isEmpty &&
-                          snapshot.connectionState !=
-                              ConnectionState.waiting) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: _createProduct,
-                            icon: const Icon(CupertinoIcons.add, size: 16),
-                            label: const Text('Agregar el primer producto'),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 14),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final horizontal = constraints.maxWidth >= 620;
-                          final codeField = TextFormField(
-                            controller: code,
-                            decoration: const InputDecoration(
-                              labelText: 'Código de estructura *',
-                              hintText: 'Ej. LM-ETQ-001',
-                            ),
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Ingresa un código'
-                                : null,
-                          );
-                          final nameField = TextFormField(
-                            controller: name,
-                            decoration: const InputDecoration(
-                              labelText: 'Nombre *',
-                            ),
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Ingresa un nombre'
-                                : null,
-                          );
-                          if (!horizontal)
-                            return Column(
+                        const SizedBox(height: 14),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final horizontal = constraints.maxWidth >= 620;
+                            final codeField = TextFormField(
+                              errorBuilder: pomgtValidationMessage,
+                              controller: code,
+                              decoration: const InputDecoration(
+                                labelText: 'Código de estructura *',
+                                hintText: 'Ej. LM-ETQ-001',
+                              ),
+                              validator: (v) => v == null || v.trim().isEmpty
+                                  ? 'Ingresa un código'
+                                  : null,
+                            );
+                            final nameField = TextFormField(
+                              errorBuilder: pomgtValidationMessage,
+                              controller: name,
+                              decoration: const InputDecoration(
+                                labelText: 'Nombre *',
+                                hintText: 'Escribe el nombre de la estructura',
+                              ),
+                              validator: (v) => v == null || v.trim().isEmpty
+                                  ? 'Ingresa un nombre'
+                                  : null,
+                            );
+                            if (!horizontal)
+                              return Column(
+                                children: [
+                                  codeField,
+                                  const SizedBox(height: 14),
+                                  nameField,
+                                ],
+                              );
+                            return Row(
                               children: [
-                                codeField,
-                                const SizedBox(height: 14),
-                                nameField,
+                                Expanded(child: codeField),
+                                const SizedBox(width: 28),
+                                Expanded(child: nameField),
                               ],
                             );
-                          return Row(
-                            children: [
-                              Expanded(child: codeField),
-                              const SizedBox(width: 28),
-                              Expanded(child: nameField),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: description,
-                        minLines: 2,
-                        maxLines: 4,
-                        decoration: const InputDecoration(
-                          labelText: 'Descripción',
+                          },
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final horizontal = constraints.maxWidth >= 620;
-                          final revisionField = TextFormField(
-                            controller: revision,
-                            decoration: const InputDecoration(
-                              labelText: 'Revisión inicial *',
-                              hintText: 'Rev. 01',
-                            ),
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Ingresa una revisión'
-                                : null,
-                          );
-                          final quantityField = TextFormField(
-                            controller: quantity,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: 'Cantidad base *',
-                            ),
-                            validator: (v) {
-                              final n = double.tryParse(
-                                (v ?? '').replaceAll(',', ''),
-                              );
-                              return n == null || n <= 0
-                                  ? 'Ingresa una cantidad válida'
-                                  : null;
-                            },
-                          );
-                          final unitField = DropdownButtonFormField<String>(
-                            initialValue:
-                                units.any(
-                                  (u) => u['id']?.toString() == outputUomId,
-                                )
-                                ? outputUomId
-                                : null,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Unidad de salida *',
-                            ),
-                            items: units
-                                .map(
-                                  (u) => DropdownMenuItem(
-                                    value: u['id'].toString(),
-                                    child: Text(
-                                      lookups.display(
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          errorBuilder: pomgtValidationMessage,
+                          controller: description,
+                          minLines: 2,
+                          maxLines: 4,
+                          decoration: const InputDecoration(
+                            labelText: 'Descripción',
+                            hintText: 'Notas sobre esta estructura…',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final horizontal = constraints.maxWidth >= 620;
+                            final revisionField = TextFormField(
+                              errorBuilder: pomgtValidationMessage,
+                              controller: revision,
+                              decoration: const InputDecoration(
+                                labelText: 'Versión inicial *',
+                                hintText: 'V.01',
+                              ),
+                              validator: (v) => v == null || v.trim().isEmpty
+                                  ? 'Ingresa una versión'
+                                  : null,
+                            );
+                            final quantityField = TextFormField(
+                              errorBuilder: pomgtValidationMessage,
+                              controller: quantity,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: const [
+                                ThousandsInputFormatter(),
+                              ],
+                              decoration: const InputDecoration(
+                                labelText: 'Cantidad base *',
+                                hintText: 'Ej. 1',
+                              ),
+                              validator: (v) {
+                                final n = double.tryParse(
+                                  (v ?? '').replaceAll(',', ''),
+                                );
+                                return n == null || n <= 0
+                                    ? 'Ingresa una cantidad válida'
+                                    : null;
+                              },
+                            );
+                            final unitField = QuickCreateField(
+                              table: 'units_of_measure',
+                              repository: generic,
+                              lookups: lookups,
+                              isEmpty: units.isEmpty,
+                              onCreated: (row) => setState(() {
+                                extraUnits.add(row);
+                                outputUomId = row['id']?.toString();
+                              }),
+                              child: CategorizedSearchPicker(
+                                label: 'Unidad de salida *',
+                                hint: 'Buscar unidad…',
+                                value:
+                                    units.any(
+                                      (u) => u['id']?.toString() == outputUomId,
+                                    )
+                                    ? outputUomId
+                                    : null,
+                                items: [
+                                  for (final u in units)
+                                    PickerItem(
+                                      id: u['id'].toString(),
+                                      label: lookups.display(
                                         Phase1Schema
                                             .tables['units_of_measure']!,
                                         u,
                                       ),
-                                      overflow: TextOverflow.ellipsis,
+                                      category: 'Unidades',
                                     ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) => setState(() => outputUomId = v),
-                            validator: (v) =>
-                                v == null ? 'Selecciona una unidad' : null,
-                          );
-                          if (!horizontal)
-                            return Column(
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => outputUomId = v),
+                                validator: (v) =>
+                                    v == null ? 'Selecciona una unidad' : null,
+                              ),
+                            );
+                            if (!horizontal)
+                              return Column(
+                                children: [
+                                  revisionField,
+                                  const SizedBox(height: 14),
+                                  quantityField,
+                                  const SizedBox(height: 14),
+                                  unitField,
+                                ],
+                              );
+                            return Row(
                               children: [
-                                revisionField,
-                                const SizedBox(height: 14),
-                                quantityField,
-                                const SizedBox(height: 14),
-                                unitField,
+                                Expanded(child: revisionField),
+                                const SizedBox(width: 24),
+                                Expanded(child: quantityField),
+                                const SizedBox(width: 24),
+                                Expanded(child: unitField),
                               ],
                             );
-                          return Row(
-                            children: [
-                              Expanded(child: revisionField),
-                              const SizedBox(width: 24),
-                              Expanded(child: quantityField),
-                              const SizedBox(width: 24),
-                              Expanded(child: unitField),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Establecer como estructura predeterminada',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                          },
                         ),
-                        subtitle: const Text(
-                          'Será la estructura sugerida al planear la fabricación de este producto.',
-                        ),
-                        value: isDefault,
-                        onChanged: (v) => setState(() => isDefault = v),
-                      ),
-                      const SizedBox(height: 22),
-                      Wrap(
-                        alignment: WrapAlignment.end,
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          TextButton(
-                            onPressed: saving
-                                ? null
-                                : () => Navigator.pop(context),
-                            child: const Text('Cancelar'),
+                        const SizedBox(height: 16),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Establecer como estructura predeterminada',
+                            style: TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          FilledButton.icon(
-                            onPressed: saving ? null : _save,
-                            icon: saving
-                                ? const SizedBox(
-                                    width: 15,
-                                    height: 15,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(
-                                    CupertinoIcons.arrow_right,
-                                    size: 16,
-                                  ),
-                            label: Text(
-                              saving
-                                  ? 'Creando…'
-                                  : 'Crear y agregar materiales',
+                          subtitle: const Text(
+                            'Será la estructura sugerida al planear la fabricación de este producto.',
+                          ),
+                          value: isDefault,
+                          onChanged: (v) => setState(() => isDefault = v),
+                        ),
+                        const SizedBox(height: 22),
+                        Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            TextButton(
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.pop(context),
+                              child: const Text('Cancelar'),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                            FilledButton.icon(
+                              onPressed: saving ? null : _save,
+                              icon: saving
+                                  ? const SizedBox(
+                                      width: 15,
+                                      height: 15,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      LucideIcons.arrowRight,
+                                      size: 16,
+                                    ),
+                              label: Text(
+                                saving
+                                    ? 'Creando…'
+                                    : 'Crear y agregar materiales',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -2261,181 +2205,6 @@ class _BomCreateDialogState extends State<_BomCreateDialog> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _BomDetail extends StatelessWidget {
-  const _BomDetail({required this.bom});
-  final Map<String, dynamic> bom;
-
-  @override
-  Widget build(BuildContext context) {
-    final generic = context.read<GenericRepository>();
-    final lookups = context.read<LookupRepository>();
-    final id = bom['id'].toString();
-
-    Future<void> edit() async {
-      final changed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => EntityFormDialog(
-          spec: Phase1Schema.tables['boms']!,
-          repository: generic,
-          lookups: lookups,
-          original: bom,
-        ),
-      );
-      if (changed == true && context.mounted)
-        context.read<BomController>().refresh();
-    }
-
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: lookups.rows('products'),
-      builder: (context, snapshot) {
-        final products = snapshot.data ?? const <Map<String, dynamic>>[];
-        final materialRows = _materialComponentRows(products);
-        final matches = products
-            .where((p) => p['id']?.toString() == bom['product_id']?.toString())
-            .toList();
-        final productName = matches.isEmpty
-            ? 'Producto sin identificar'
-            : lookups.display(Phase1Schema.tables['products']!, matches.first);
-        return Container(
-          color: Colors.white,
-          child: Column(
-            children: [
-              DetailHeader(
-                icon: CupertinoIcons.square_stack_3d_up,
-                title: bom['name']?.toString() ?? 'Estructura de fabricación',
-                subtitle: '${bom['bom_code'] ?? 'Sin código'} · $productName',
-                help:
-                    'La cabecera identifica la estructura. Las cantidades y componentes se conservan por revisión para mantener la trazabilidad histórica.',
-                onEdit: edit,
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: DefaultTabController(
-                  length: 5,
-                  initialIndex: 2,
-                  child: Column(
-                    children: [
-                      Container(
-                        color: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        child: const TabBar(
-                          isScrollable: true,
-                          tabAlignment: TabAlignment.start,
-                          dividerColor: Colors.transparent,
-                          indicatorColor: PomgtColors.blue,
-                          labelColor: PomgtColors.ink,
-                          unselectedLabelColor: PomgtColors.muted,
-                          tabs: [
-                            HelpTab(
-                              label: 'General',
-                              help:
-                                  'Producto, código, nombre y configuración principal de la estructura de fabricación.',
-                            ),
-                            HelpTab(
-                              label: 'Revisiones',
-                              help:
-                                  'Versiones de la estructura con cantidad base, unidad, merma, rendimiento, vigencia y aprobación.',
-                            ),
-                            HelpTab(
-                              label: 'Materiales y componentes',
-                              help:
-                                  'Materiales, subensambles, consumibles y empaques necesarios para fabricar el producto.',
-                            ),
-                            HelpTab(
-                              label: 'Sustitutos',
-                              help:
-                                  'Alternativas permitidas para componentes cuando el material principal no está disponible.',
-                            ),
-                            HelpTab(
-                              label: 'Documentos',
-                              help:
-                                  'Especificaciones, planos y documentos vinculados a cada revisión de la estructura.',
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1),
-                      Expanded(
-                        child: TabBarView(
-                          children: [
-                            _BomSummary(bom: bom, productName: productName),
-                            Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: EntityCrudPanel(
-                                table: 'bom_revisions',
-                                repository: generic,
-                                lookups: lookups,
-                                fixedValues: {'bom_id': id},
-                                title: 'Revisiones de la estructura',
-                                description:
-                                    'Controla la cantidad base, unidad, merma esperada, rendimiento, vigencia, aprobación y estado. Solo una revisión puede estar activa al mismo tiempo.',
-                                flatList: true,
-                              ),
-                            ),
-                            NestedRelationPanel(
-                              title: 'Materiales por revisión',
-                              help:
-                                  'Selecciona una revisión y agrega los materiales, subensambles, consumibles o empaques necesarios. Los selectores muestran SKU y nombre, nunca identificadores técnicos.',
-                              parentTable: 'bom_revisions',
-                              parentFilter: {'bom_id': id},
-                              repository: generic,
-                              lookups: lookups,
-                              childReferenceRows: {
-                                'bom_items': {
-                                  'component_product_id': materialRows,
-                                },
-                              },
-                              flatList: true,
-                              childTabs: const [
-                                ChildTabDefinition(
-                                  table: 'bom_items',
-                                  label: 'Materiales y componentes',
-                                  foreignKey: 'bom_revision_id',
-                                  help:
-                                      'Define componente, cantidad o fórmula, unidad, merma, rendimiento, consumo y, cuando aplica, una estructura hija para subensambles.',
-                                ),
-                              ],
-                            ),
-                            _BomSubstitutesPanel(
-                              bomId: id,
-                              repository: generic,
-                              lookups: lookups,
-                              materialRows: materialRows,
-                            ),
-                            NestedRelationPanel(
-                              title: 'Documentos por revisión',
-                              help:
-                                  'Relaciona especificaciones, planos u otros documentos con una revisión específica de la estructura de fabricación.',
-                              parentTable: 'bom_revisions',
-                              parentFilter: {'bom_id': id},
-                              repository: generic,
-                              lookups: lookups,
-                              childTabs: const [
-                                ChildTabDefinition(
-                                  table: 'document_links',
-                                  label: 'Documentos',
-                                  foreignKey: 'bom_revision_id',
-                                  help:
-                                      'Vínculos documentales asociados a la revisión seleccionada.',
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }
@@ -2447,236 +2216,50 @@ class _BomSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text('Definición', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(width: 7),
-              const InfoTip(
-                'La estructura define con qué se fabrica el producto. Las cantidades específicas se encuentran dentro de cada revisión.',
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Wrap(
-            spacing: 36,
-            runSpacing: 22,
-            children: [
-              _KV('Código', '${bom['bom_code'] ?? '—'}'),
-              _KV('Producto', productName),
-              _KV('Predeterminada', bom['is_default'] == true ? 'Sí' : 'No'),
-              _KV('Activa', bom['is_active'] == true ? 'Sí' : 'No'),
-            ],
-          ),
-          if (bom['description'] != null &&
-              bom['description'].toString().trim().isNotEmpty) ...[
-            const SizedBox(height: 30),
-            Text(
-              bom['description'].toString(),
-              style: const TextStyle(
-                color: PomgtColors.secondaryInk,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _BomSubstitutesPanel extends StatefulWidget {
-  const _BomSubstitutesPanel({
-    required this.bomId,
-    required this.repository,
-    required this.lookups,
-    required this.materialRows,
-  });
-  final String bomId;
-  final GenericRepository repository;
-  final LookupRepository lookups;
-  final List<Map<String, dynamic>> materialRows;
-
-  @override
-  State<_BomSubstitutesPanel> createState() => _BomSubstitutesPanelState();
-}
-
-class _BomSubstitutesPanelState extends State<_BomSubstitutesPanel> {
-  String? revisionId;
-  String? itemId;
-  late Future<List<Map<String, dynamic>>> revisions;
-  late Future<List<Map<String, dynamic>>> products;
-
-  @override
-  void initState() {
-    super.initState();
-    revisions = widget.repository.listRows(
-      Phase1Schema.tables['bom_revisions']!,
-      filters: {'bom_id': widget.bomId},
-    );
-    products = widget.lookups.rows('products');
-  }
-
-  String _componentLabel(
-    Map<String, dynamic> item,
-    List<Map<String, dynamic>> productRows,
-  ) {
-    final id = item['component_product_id']?.toString();
-    final match = productRows.where((p) => p['id']?.toString() == id).toList();
-    final product = match.isEmpty
-        ? 'Componente'
-        : widget.lookups.display(Phase1Schema.tables['products']!, match.first);
-    return 'Línea ${item['line_no'] ?? '—'} · $product';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text('Sustitutos', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(width: 7),
-              const InfoTip(
-                'Selecciona una revisión y un material. Puedes definir alternativas, prioridad, relación de conversión, porcentaje máximo, vigencia y si requieren aprobación.',
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          FutureBuilder<List<List<Map<String, dynamic>>>>(
-            future: Future.wait([revisions, products]),
-            builder: (context, snap) {
-              final data =
-                  snap.data ??
-                  <List<Map<String, dynamic>>>[
-                    <Map<String, dynamic>>[],
-                    <Map<String, dynamic>>[],
-                  ];
-              final rows = data[0];
-              final productRows = data[1];
-              if (snap.connectionState == ConnectionState.waiting)
-                return const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                );
-              if (rows.isEmpty)
-                return const Expanded(
-                  child: Center(
-                    child: Text(
-                      'Crea primero una revisión de la estructura de fabricación.',
-                      style: TextStyle(color: PomgtColors.muted),
-                    ),
-                  ),
-                );
-              revisionId ??= rows.first['id'].toString();
-              return Expanded(
-                child: Column(
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue:
-                          rows.any((r) => r['id']?.toString() == revisionId)
-                          ? revisionId
-                          : null,
-                      decoration: const InputDecoration(labelText: 'Revisión'),
-                      items: rows
-                          .map(
-                            (r) => DropdownMenuItem(
-                              value: r['id'].toString(),
-                              child: Text(
-                                '${r['revision_code']} · ${UiCopy.enumLabel(r['status']?.toString() ?? '')}',
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() {
-                        revisionId = v;
-                        itemId = null;
-                      }),
-                    ),
-                    const SizedBox(height: 14),
-                    Expanded(
-                      child: FutureBuilder<List<Map<String, dynamic>>>(
-                        future: widget.repository.listRows(
-                          Phase1Schema.tables['bom_items']!,
-                          filters: {'bom_revision_id': revisionId},
-                        ),
-                        builder: (context, itemSnap) {
-                          final items =
-                              itemSnap.data ?? const <Map<String, dynamic>>[];
-                          if (itemSnap.connectionState ==
-                              ConnectionState.waiting)
-                            return const Center(
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            );
-                          if (items.isEmpty)
-                            return const Center(
-                              child: Text(
-                                'Agrega materiales a esta revisión para configurar sustitutos.',
-                                style: TextStyle(color: PomgtColors.muted),
-                              ),
-                            );
-                          itemId ??= items.first['id'].toString();
-                          return Column(
-                            children: [
-                              DropdownButtonFormField<String>(
-                                initialValue:
-                                    items.any(
-                                      (r) => r['id']?.toString() == itemId,
-                                    )
-                                    ? itemId
-                                    : null,
-                                decoration: const InputDecoration(
-                                  labelText: 'Material o componente',
-                                ),
-                                items: items
-                                    .map(
-                                      (r) => DropdownMenuItem(
-                                        value: r['id'].toString(),
-                                        child: Text(
-                                          _componentLabel(r, productRows),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (v) => setState(() => itemId = v),
-                              ),
-                              const SizedBox(height: 14),
-                              Expanded(
-                                child: EntityCrudPanel(
-                                  table: 'bom_item_substitutes',
-                                  repository: widget.repository,
-                                  lookups: widget.lookups,
-                                  fixedValues: {'bom_item_id': itemId},
-                                  referenceRows: {
-                                    'substitute_product_id':
-                                        widget.materialRows,
-                                  },
-                                  flatList: true,
-                                  title: 'Alternativas permitidas',
-                                  description:
-                                      'Productos o materiales alternativos permitidos para el componente seleccionado.',
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+    return ScrollToTopArea(
+      padding: const EdgeInsets.all(16),
+      builder: (context, controller) => SingleChildScrollView(
+        controller: controller,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Definición',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-              );
-            },
-          ),
-        ],
+                const SizedBox(width: 7),
+                const InfoTip(
+                  'La estructura define con qué se fabrica el producto. Las cantidades específicas se encuentran dentro de cada versión.',
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            Wrap(
+              spacing: 36,
+              runSpacing: 22,
+              children: [
+                _KV('Código', '${bom['bom_code'] ?? '—'}'),
+                _KV('Producto', productName),
+                _KV('Predeterminada', bom['is_default'] == true ? 'Sí' : 'No'),
+                _KV('Activa', bom['is_active'] == true ? 'Sí' : 'No'),
+              ],
+            ),
+            if (bom['description'] != null &&
+                bom['description'].toString().trim().isNotEmpty) ...[
+              const SizedBox(height: 30),
+              Text(
+                bom['description'].toString(),
+                style: const TextStyle(
+                  color: PomgtColors.secondaryInk,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

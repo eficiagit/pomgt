@@ -1,4 +1,7 @@
+import 'motion.dart';
+
 import 'package:flutter/material.dart';
+
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
@@ -32,7 +35,7 @@ class ModuleTabsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 640;
-    return DefaultTabController(
+    return PomgtTabController(
       length: tables.length,
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -55,36 +58,29 @@ class ModuleTabsPage extends StatelessWidget {
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: PomgtColors.ink,
-                      letterSpacing: 0,
-                    ),
+                    style: Theme.of(context).textTheme.headlineMedium,
                   ),
                 ),
                 InfoTip(help, size: 19),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: PomgtColors.surfaceAlt,
-                borderRadius: PomgtRadii.borderSm,
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: PomgtColors.line)),
               ),
               child: TabBar(
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 dividerColor: Colors.transparent,
                 indicatorColor: PomgtColors.blue,
-                indicator: const BoxDecoration(
-                  color: PomgtColors.navySelected,
-                  borderRadius: PomgtRadii.borderSm,
-                ),
                 indicatorSize: TabBarIndicatorSize.tab,
                 labelColor: PomgtColors.ink,
                 unselectedLabelColor: PomgtColors.muted,
-                labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
                 tabs: tables.map((t) {
                   final spec = Phase1Schema.tables[t.table];
                   final label =

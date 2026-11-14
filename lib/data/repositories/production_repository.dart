@@ -1,4 +1,9 @@
 import 'dart:convert';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../core/utils/action_exception.dart';
+import '../utils/operation_materials.dart';
 import 'base_repository.dart';
 
 class ProductionRepository extends BaseRepository {
@@ -20,20 +25,456 @@ class ProductionRepository extends BaseRepository {
     });
   }
 
-  Future<Map<String, dynamic>> detail(String orderId) async {
-    final order = await service.one('v_production_order_workspace', orderId);
-    if (order == null) throw StateError('Orden de producción no encontrada.');
+  /// The floor uses paginated, tenant-scoped reads: no silent 500-row cutoff.
+  Future<Map<String, dynamic>> floorSnapshot() async {
+    final org = organizationId;
+    if (org == null) throw StateError('No hay una organización seleccionada.');
+    const tables = {
+      'machines': 'machines',
+      'work_centers': 'work_centers',
+      'machine_types': 'machine_types',
+      'machine_categories': 'machine_categories',
+      'operations': 'production_order_operations',
+      'orders': 'v_production_order_workspace',
+      'products': 'products',
+      'operators': 'operators',
+      'order_operators': 'production_order_operators',
+      'product_categories': 'product_categories',
+      'material_categories': 'material_categories',
+      'material_types': 'material_types',
+      'product_types': 'product_types',
+      'labor_roles': 'labor_roles',
+    };
+    final batches = await Future.wait<dynamic>([
+      Future.wait(
+        tables.entries.map(
+          (entry) async => MapEntry(
+            entry.key,
+            await service.listAll(
+              entry.value,
+              equals: {'organization_id': org},
+            ),
+          ),
+        ),
+      ),
+      service.listAll('units_of_measure'),
+      _floorInventory(org),
+    ]);
+    final tableRows = Map<String, List<Map<String, dynamic>>>.fromEntries(
+      batches[0] as List<MapEntry<String, List<Map<String, dynamic>>>>,
+    );
+    tableRows['operations'] = await _floorOperations(
+      orders: tableRows['orders'] ?? const [],
+      operations: tableRows['operations'] ?? const [],
+    );
+    return {
+      ...tableRows,
+      'units': batches[1],
+      ...batches[2] as Map<String, dynamic>,
+    };
+  }
 
-    var operations = await service.list(
+  Future<List<Map<String, dynamic>>> _floorOperations({
+    required List<Map<String, dynamic>> orders,
+    required List<Map<String, dynamic>> operations,
+  }) async {
+    final ordersWithSnapshot = operations
+        .map((row) => row['production_order_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final ordersNeedingRoute = orders.where((order) {
+      final id = order['id']?.toString();
+      final routeId = order['routing_revision_id']?.toString();
+      return id != null &&
+          !ordersWithSnapshot.contains(id) &&
+          routeId != null &&
+          routeId.isNotEmpty;
+    }).toList();
+    final routingIds = ordersNeedingRoute
+        .map((order) => order['routing_revision_id'].toString())
+        .toSet();
+    // Orders are already tenant-scoped. Their routing revision IDs can point
+    // to category-shared routings whose operation rows have no organization ID.
+    final routeSteps = await service.listIn(
+      'routing_operations',
+      'routing_revision_id',
+      routingIds,
+      orderBy: 'sequence_no',
+    );
+    final stepsByRouting = <String, List<Map<String, dynamic>>>{};
+    for (final step in routeSteps) {
+      final id = step['routing_revision_id']?.toString();
+      if (id != null) stepsByRouting.putIfAbsent(id, () => []).add(step);
+    }
+
+    final inferred = <Map<String, dynamic>>[];
+    for (final order in ordersNeedingRoute) {
+      final orderId = order['id'].toString();
+      final steps =
+          stepsByRouting[order['routing_revision_id'].toString()] ??
+          const <Map<String, dynamic>>[];
+      final orderStatus = order['status']?.toString();
+      for (var index = 0; index < steps.length; index++) {
+        final step = steps[index];
+        final terminal = orderStatus == 'completed'
+            ? 'completed'
+            : orderStatus == 'cancelled'
+            ? 'cancelled'
+            : null;
+        final stepStatus =
+            terminal ??
+            switch (orderStatus) {
+              'on_hold' when index == 0 => 'on_hold',
+              _ => 'ready',
+            };
+        inferred.add({
+          'id': 'routing:${step['id']}:$orderId',
+          'production_order_id': orderId,
+          'routing_operation_id': step['id'],
+          'source_routing_operation_id': step['id'],
+          'operation_type': step['operation_type'],
+          'operation_code': step['operation_code'],
+          'sequence_no': step['sequence_no'],
+          'name': step['name'],
+          'description': step['description'],
+          'work_center_id': step['work_center_id'],
+          'machine_id': step['preferred_machine_id'],
+          'setup_time_minutes': step['setup_time_minutes'],
+          'planned_quantity': order['planned_quantity'],
+          'completed_quantity': 0,
+          'rejected_quantity': 0,
+          'status': stepStatus,
+          'snapshot_inferred': true,
+        });
+      }
+    }
+    return [...await _normalizeOperationRows(operations), ...inferred];
+  }
+
+  Future<Map<String, dynamic>> _floorInventory(String org) async {
+    const tables = [
+      'floor_zones',
+      'warehouses',
+      'inventory_stock',
+      'inventory_movements',
+    ];
+    try {
+      final entries = await Future.wait(
+        tables.map(
+          (table) async => MapEntry(
+            table,
+            await service.listAll(table, equals: {'organization_id': org}),
+          ),
+        ),
+      );
+      return {...Map.fromEntries(entries), 'inventory_available': true};
+    } on PostgrestException catch (error) {
+      if (!['42P01', 'PGRST205'].contains(error.code)) rethrow;
+      return {
+        'inventory_available': false,
+        'inventory_error': 'Las áreas y el inventario requieren la actualización de la base de datos.',
+      };
+    }
+  }
+
+  String get _floorOrganization {
+    final org = organizationId;
+    if (org == null) throw StateError('No hay una organización seleccionada.');
+    return org;
+  }
+
+  Future<Map<String, dynamic>> floorProductDetail(String id) async {
+    final product = await service.one('products', id);
+    if (product == null || product['organization_id'] != _floorOrganization) {
+      throw StateError('Producto no encontrado en esta organización.');
+    }
+    final tables = {
+      'revisions': 'product_revisions',
+      'boms': 'boms',
+      'routings': 'routings',
+      'customers': 'customer_products',
+      'documents': 'document_links',
+    };
+    final entries = await Future.wait(
+      tables.entries.map(
+        (e) async => MapEntry(
+          e.key,
+          await service.listAll(
+            e.value,
+            equals: {'organization_id': _floorOrganization, 'product_id': id},
+          ),
+        ),
+      ),
+    );
+    final result = <String, dynamic>{...Map.fromEntries(entries)};
+    // Category routings are shared in this app; they need not have product_id.
+    if (product['category_id'] != null) {
+      final shared = await service.listAll(
+        'routings',
+        equals: {
+          'organization_id': _floorOrganization,
+          'category_id': product['category_id'],
+        },
+      );
+      result['routings'] = {
+        for (final route in result['routings'] as List<Map<String, dynamic>>)
+          '${route['id']}': route,
+        for (final route in shared)
+          if (route['product_id'] == null || route['product_id'] == id)
+            '${route['id']}': route,
+      }.values.toList();
+    }
+    final revisions = (result['revisions'] as List<Map<String, dynamic>>)
+        .map((r) => '${r['id']}')
+        .toList();
+    final bomIds = (result['boms'] as List<Map<String, dynamic>>)
+        .map((r) => '${r['id']}')
+        .toList();
+    final routingIds = (result['routings'] as List<Map<String, dynamic>>)
+        .map((r) => '${r['id']}')
+        .toList();
+    final related = await Future.wait([
+      _floorRelated(
+        'material_revision_attribute_values',
+        'product_revision_id',
+        revisions,
+      ),
+      _floorRelated('bom_revisions', 'bom_id', bomIds),
+      _floorRelated('routing_revisions', 'routing_id', routingIds),
+    ]);
+    result['attributes'] = related[0];
+    result['bom_revisions'] = related[1];
+    result['routing_revisions'] = related[2];
+    final lines = await Future.wait([
+      _floorRelated(
+        'bom_items',
+        'bom_revision_id',
+        related[1].map((r) => '${r['id']}').toList(),
+      ),
+      _floorRelated(
+        'routing_operations',
+        'routing_revision_id',
+        related[2].map((r) => '${r['id']}').toList(),
+      ),
+      _floorRelated(
+        'material_attribute_definitions',
+        'id',
+        related[0]
+            .map((r) => '${r['attribute_definition_id']}')
+            .toSet()
+            .toList(),
+      ),
+    ]);
+    result['bom_items'] = lines[0];
+    result['routing_operations'] = lines[1];
+    result['attribute_definitions'] = lines[2];
+    return result;
+  }
+
+  Future<List<Map<String, dynamic>>> _floorRelated(
+    String table,
+    String column,
+    List<String> ids,
+  ) async {
+    final batches = await Future.wait([
+      for (var i = 0; i < ids.length; i += 100)
+        service.listAll(
+          table,
+          within: {
+            column: ids.sublist(i, i + 100 > ids.length ? ids.length : i + 100),
+          },
+        ),
+    ]);
+    return batches.expand((rows) => rows).toList();
+  }
+
+  Future<void> updateMachinePosition(
+    String machineId,
+    double x,
+    double y,
+  ) async {
+    if (!x.isFinite || !y.isFinite || x < 0 || y < 0) {
+      throw ArgumentError('La posición debe estar dentro del plano.');
+    }
+    await service.updateWhere(
+      'machines',
+      {'id': machineId, 'organization_id': _floorOrganization},
+      {'floor_pos_x': x, 'floor_pos_y': y},
+    );
+  }
+
+  Future<void> saveFloorZone(Map<String, dynamic> values, {String? id}) async {
+    if (id == null) {
+      await service.insert('floor_zones', tenantValues(values));
+    } else {
+      await service.updateWhere('floor_zones', {
+        'id': id,
+        'organization_id': _floorOrganization,
+      }, values);
+    }
+  }
+
+  Future<void> deleteFloorZone(String id) => service.deleteWhere(
+    'floor_zones',
+    {'id': id, 'organization_id': _floorOrganization},
+  );
+
+  Future<void> saveFloorWarehouse(
+    Map<String, dynamic> values, {
+    String? id,
+  }) async {
+    if (id == null) {
+      await service.insert('warehouses', tenantValues(values));
+    } else {
+      await service.updateWhere('warehouses', {
+        'id': id,
+        'organization_id': _floorOrganization,
+      }, values);
+    }
+  }
+
+  Future<void> recordFloorInventoryMovement({
+    required String warehouseId,
+    required String productId,
+    required String movementType,
+    required double quantity,
+    required String requestId,
+    String? notes,
+    String? materialId,
+  }) async {
+    if (!quantity.isFinite || quantity <= 0) {
+      throw ArgumentError('La cantidad debe ser mayor que cero.');
+    }
+    await service.rpc(
+      'record_floor_inventory_movement',
+      params: {
+        'p_warehouse_id': warehouseId,
+        'p_product_id': productId,
+        'p_movement_type': movementType,
+        'p_quantity': quantity,
+        'p_request_id': requestId,
+        'p_notes': notes,
+        'p_material_id': materialId,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> detail(String orderId) =>
+      _loadOrderDetail(orderId);
+
+  Future<Map<String, dynamic>> floorOrderDetail(String orderId) =>
+      _loadOrderDetail(orderId, paginated: true);
+
+  Future<Map<String, dynamic>> _loadOrderDetail(
+    String orderId, {
+    bool paginated = false,
+  }) async {
+    Future<List<Map<String, dynamic>>> readRows(
+      String table, {
+      Map<String, dynamic> equals = const {},
+      String? orderBy,
+      bool ascending = true,
+      int limit = 500,
+    }) async {
+      if (!paginated) {
+        return service.list(
+          table,
+          equals: equals,
+          orderBy: orderBy,
+          ascending: ascending,
+          limit: limit,
+        );
+      }
+      final rows = await service.listAll(table, equals: equals);
+      if (orderBy != null) {
+        rows.sort((a, b) {
+          final av = a[orderBy], bv = b[orderBy];
+          final comparison = av is num && bv is num
+              ? av.compareTo(bv)
+              : '${av ?? ''}'.compareTo('${bv ?? ''}');
+          return ascending ? comparison : -comparison;
+        });
+      }
+      return rows;
+    }
+
+    var order = await service.one('v_production_order_workspace', orderId);
+    if (order == null) throw StateError('Orden de producción no encontrada.');
+    order = await _resolveManufacturingRevisions(order);
+
+    // Everything kicked off below only depends on orderId or a scalar
+    // already on `order` - starting every request up front (instead of
+    // awaiting one at a time) turns what used to be a long chain of
+    // sequential round trips into a single parallel batch, which is most of
+    // what made this screen slow to open.
+    final operationsFuture = readRows(
       'production_order_operations',
       equals: {'production_order_id': orderId},
       orderBy: 'sequence_no',
     );
-    var materials = await service.list(
+    final materialsFuture = readRows(
       'production_order_materials',
       equals: {'production_order_id': orderId},
       orderBy: 'line_no',
     );
+    final checklistFuture = readRows(
+      'production_order_checklist_items',
+      equals: {'production_order_id': orderId},
+      orderBy: 'sequence_no',
+    );
+    final qualityFuture = readRows(
+      'production_order_quality_checks',
+      equals: {'production_order_id': orderId},
+      orderBy: 'sequence_no',
+    );
+    final parametersFuture = readRows(
+      'production_order_machine_parameters',
+      equals: {'production_order_id': orderId},
+      orderBy: 'created_at',
+    );
+    final eventsFuture = readRows(
+      'production_order_events',
+      equals: {'production_order_id': orderId},
+      orderBy: 'occurred_at',
+      ascending: false,
+    );
+    final costsFuture = readRows(
+      'production_order_costs',
+      equals: {'production_order_id': orderId},
+      limit: 1,
+    );
+    final allocationsFuture = readRows(
+      'production_order_allocations',
+      equals: {'production_order_id': orderId},
+      orderBy: 'created_at',
+    );
+    final dependenciesFuture = readRows(
+      'production_order_operation_dependencies',
+      equals: {'production_order_id': orderId},
+    );
+    final movementsFuture = readRows(
+      'production_order_material_movements',
+      equals: {'production_order_id': orderId},
+      orderBy: 'occurred_at',
+      ascending: false,
+    );
+    final productFuture = service.one(
+      'products',
+      order['product_id'].toString(),
+    );
+    final uomFuture = service.one(
+      'units_of_measure',
+      order['uom_id'].toString(),
+    );
+    final customerOrderFuture = order['customer_order_id'] == null
+        ? Future<Map<String, dynamic>?>.value(null)
+        : service.one('customer_orders', order['customer_order_id'].toString());
+    final customerFuture = order['customer_id'] == null
+        ? Future<Map<String, dynamic>?>.value(null)
+        : service.one('customers', order['customer_id'].toString());
+
+    var operations = await operationsFuture;
+    var materials = await materialsFuture;
     if (operations.isEmpty) {
       operations = await _operationsFromRouting(orderId, order);
     }
@@ -49,41 +490,14 @@ class ProductionRepository extends BaseRepository {
       materials,
       routingOperationMaterials,
     );
-    final checklist = await service.list(
-      'production_order_checklist_items',
-      equals: {'production_order_id': orderId},
-      orderBy: 'sequence_no',
-    );
-    final quality = await service.list(
-      'production_order_quality_checks',
-      equals: {'production_order_id': orderId},
-      orderBy: 'sequence_no',
-    );
-    final parameters = await service.list(
-      'production_order_machine_parameters',
-      equals: {'production_order_id': orderId},
-      orderBy: 'created_at',
-    );
-    final events = await service.list(
-      'production_order_events',
-      equals: {'production_order_id': orderId},
-      orderBy: 'occurred_at',
-      ascending: false,
-    );
-    final costs = await service.list(
-      'production_order_costs',
-      equals: {'production_order_id': orderId},
-      limit: 1,
-    );
-    final allocations = await service.list(
-      'production_order_allocations',
-      equals: {'production_order_id': orderId},
-      orderBy: 'created_at',
-    );
-    final dependencies = await service.list(
-      'production_order_operation_dependencies',
-      equals: {'production_order_id': orderId},
-    );
+
+    final checklist = await checklistFuture;
+    final quality = await qualityFuture;
+    final parameters = await parametersFuture;
+    final events = await eventsFuture;
+    final costs = await costsFuture;
+    final allocations = await allocationsFuture;
+    final dependencies = await dependenciesFuture;
     dependencies.sort((a, b) {
       final operation = (a['operation_id']?.toString() ?? '').compareTo(
         b['operation_id']?.toString() ?? '',
@@ -93,80 +507,76 @@ class ProductionRepository extends BaseRepository {
         b['predecessor_operation_id']?.toString() ?? '',
       );
     });
-    final movements = await service.list(
-      'production_order_material_movements',
-      equals: {'production_order_id': orderId},
-      orderBy: 'occurred_at',
-      ascending: false,
-    );
+    final movements = await movementsFuture;
+    final product = await productFuture;
+    final uom = await uomFuture;
+    final customerOrder = await customerOrderFuture;
+    final customer = await customerFuture;
 
-    final product = await service.one(
+    // Resolve every reference row (work centers, machines, products, units)
+    // with one batched "id in (...)" query per table, instead of one round
+    // trip per distinct id referenced by the operations/materials/quality
+    // checks above.
+    final workCenterIds = operations
+        .map((op) => op['work_center_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final machineIds = operations
+        .map((op) => op['machine_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final materialProductIds = materials
+        .map((m) => m['material_product_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final uomIds = {
+      ...materials.map((m) => m['uom_id']?.toString()).whereType<String>(),
+      ...quality.map((q) => q['uom_id']?.toString()).whereType<String>(),
+    };
+
+    final workCentersFuture = service.listIn(
+      'work_centers',
+      'id',
+      workCenterIds,
+    );
+    final machinesFuture = service.listIn('machines', 'id', machineIds);
+    final materialProductsFuture = service.listIn(
       'products',
-      order['product_id'].toString(),
+      'id',
+      materialProductIds,
     );
-    final uom = await service.one(
-      'units_of_measure',
-      order['uom_id'].toString(),
-    );
+    final materialUomsFuture = service.listIn('units_of_measure', 'id', uomIds);
+    final materialRevisionsFuture = _materialRevisions(materials);
 
-    final customerOrder = order['customer_order_id'] == null
-        ? null
-        : await service.one(
-            'customer_orders',
-            order['customer_order_id'].toString(),
-          );
-    final customer = order['customer_id'] == null
-        ? null
-        : await service.one('customers', order['customer_id'].toString());
-
-    final workCenters = <String, Map<String, dynamic>>{};
-    final machines = <String, Map<String, dynamic>>{};
-    final products = <String, Map<String, dynamic>>{};
-    final units = <String, Map<String, dynamic>>{};
-
+    final workCenters = {
+      for (final row in await workCentersFuture) row['id'].toString(): row,
+    };
+    final machines = {
+      for (final row in await machinesFuture) row['id'].toString(): row,
+    };
+    final products = <String, Map<String, dynamic>>{
+      for (final row in await materialProductsFuture) row['id'].toString(): row,
+    };
     if (product != null) products[product['id'].toString()] = product;
+    final units = <String, Map<String, dynamic>>{
+      for (final row in await materialUomsFuture) row['id'].toString(): row,
+    };
     if (uom != null) units[uom['id'].toString()] = uom;
 
-    for (final op in operations) {
-      final wc = op['work_center_id']?.toString();
-      if (wc != null && !workCenters.containsKey(wc)) {
-        final row = await service.one('work_centers', wc);
-        if (row != null) workCenters[wc] = row;
-      }
-      final machine = op['machine_id']?.toString();
-      if (machine != null && !machines.containsKey(machine)) {
-        final row = await service.one('machines', machine);
-        if (row != null) machines[machine] = row;
-      }
+    for (final entry in routingOperationMaterials.entries.toList()) {
+      routingOperationMaterials[entry.key] = resolveOperationMaterialTypes(
+        entry.value,
+        materials,
+        products,
+      );
     }
-
-    for (final material in materials) {
-      final pid = material['material_product_id']?.toString();
-      if (pid != null && !products.containsKey(pid)) {
-        final row = await service.one('products', pid);
-        if (row != null) products[pid] = row;
-      }
-      final uid = material['uom_id']?.toString();
-      if (uid != null && !units.containsKey(uid)) {
-        final row = await service.one('units_of_measure', uid);
-        if (row != null) units[uid] = row;
-      }
-    }
-    final materialRevisions = await _materialRevisions(materials);
+    final materialRevisions = await materialRevisionsFuture;
     final materialAttributeValues = await _materialAttributeValues(
       materialRevisions,
     );
     final materialAttributeDefinitions = await _materialAttributeDefinitions(
       materialAttributeValues,
     );
-
-    for (final check in quality) {
-      final uid = check['uom_id']?.toString();
-      if (uid != null && !units.containsKey(uid)) {
-        final row = await service.one('units_of_measure', uid);
-        if (row != null) units[uid] = row;
-      }
-    }
 
     return {
       'order': order,
@@ -209,6 +619,8 @@ class ProductionRepository extends BaseRepository {
         .whereType<String>()
         .toSet();
     for (final link in operationMaterials.values.expand((rows) => rows)) {
+      // A type selects from the order's BOM; it is never a direct material.
+      if (link['material_type_id'] != null) continue;
       final bomItemId = link['bom_item_id']?.toString();
       final productId = link['material_product_id']?.toString();
       final alreadyIncluded =
@@ -231,7 +643,7 @@ class ProductionRepository extends BaseRepository {
         'consumed_quantity': 0,
         'scrap_quantity': 0,
         'issue_method': link['consumption_point'],
-        'status': 'planned',
+        'status': 'ready',
         'notes': link['notes'],
       });
       if (bomItemId != null) existingBomItems.add(bomItemId);
@@ -243,26 +655,37 @@ class ProductionRepository extends BaseRepository {
   Future<List<Map<String, dynamic>>> _normalizeOperationRows(
     List<Map<String, dynamic>> operations,
   ) async {
-    final normalized = <Map<String, dynamic>>[];
-    for (final row in operations) {
+    final missingSourceIds = operations
+        .where((row) => row['operation_type'] == null)
+        .map(
+          (row) =>
+              row['source_routing_operation_id']?.toString() ??
+              row['routing_operation_id']?.toString(),
+        )
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final routingOperations = {
+      for (final row in await service.listIn(
+        'routing_operations',
+        'id',
+        missingSourceIds,
+      ))
+        row['id'].toString(): row,
+    };
+    return operations.map((row) {
       final copy = Map<String, dynamic>.from(row);
       copy['routing_operation_id'] ??= copy['source_routing_operation_id'];
       if (copy['operation_type'] == null) {
-        final sourceId = copy['source_routing_operation_id']?.toString();
-        if (sourceId != null && sourceId.isNotEmpty) {
-          final routingOperation = await service.one(
-            'routing_operations',
-            sourceId,
-          );
-          copy['operation_type'] =
-              routingOperation?['operation_type']?.toString() ?? 'activity';
-        } else {
-          copy['operation_type'] = 'activity';
-        }
+        final sourceId =
+            copy['source_routing_operation_id']?.toString() ??
+            copy['routing_operation_id']?.toString();
+        copy['operation_type'] =
+            routingOperations[sourceId]?['operation_type']?.toString() ??
+            'activity';
       }
-      normalized.add(copy);
-    }
-    return normalized;
+      return copy;
+    }).toList();
   }
 
   List<Map<String, dynamic>> _normalizeMaterialRows(
@@ -278,18 +701,24 @@ class ProductionRepository extends BaseRepository {
   Future<Map<String, List<Map<String, dynamic>>>> _routingOperationMaterials(
     List<Map<String, dynamic>> operations,
   ) async {
+    final routingOperationIds = operations
+        .map((op) => op['routing_operation_id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    // A single "in (...)" query, ordered by consumption_point, groups back
+    // into per-operation lists that keep that same relative order.
+    final rows = await service.listIn(
+      'routing_operation_materials',
+      'routing_operation_id',
+      routingOperationIds,
+      orderBy: 'consumption_point',
+    );
     final byOperation = <String, List<Map<String, dynamic>>>{};
-    for (final op in operations) {
-      final routingOperationId = op['routing_operation_id']?.toString();
-      if (routingOperationId == null || routingOperationId.isEmpty) continue;
-      final rows = await service.list(
-        'routing_operation_materials',
-        equals: {'routing_operation_id': routingOperationId},
-        orderBy: 'consumption_point',
-      );
-      if (rows.isNotEmpty) {
-        byOperation[routingOperationId] = rows;
-      }
+    for (final row in rows) {
+      final id = row['routing_operation_id']?.toString();
+      if (id == null) continue;
+      byOperation.putIfAbsent(id, () => []).add(row);
     }
     return byOperation;
   }
@@ -297,24 +726,33 @@ class ProductionRepository extends BaseRepository {
   Future<Map<String, Map<String, dynamic>>> _materialRevisions(
     List<Map<String, dynamic>> materials,
   ) async {
-    final revisions = <String, Map<String, dynamic>>{};
+    final org = organizationId;
+    if (org == null) throw StateError('No hay una organización seleccionada.');
     final materialIds = materials
         .map((row) => row['material_product_id']?.toString())
         .whereType<String>()
         .toSet();
-    for (final materialId in materialIds) {
-      final rows = await listTenant(
-        'product_revisions',
-        filters: {'product_id': materialId},
-        orderBy: 'revision_no',
-      );
-      if (rows.isEmpty) continue;
-      final active = rows.cast<Map<String, dynamic>?>().firstWhere(
+    final rows = await service.listIn(
+      'product_revisions',
+      'product_id',
+      materialIds,
+      equals: {'organization_id': org},
+      orderBy: 'revision_no',
+    );
+    final byMaterial = <String, List<Map<String, dynamic>>>{};
+    for (final row in rows) {
+      final id = row['product_id']?.toString();
+      if (id == null) continue;
+      byMaterial.putIfAbsent(id, () => []).add(row);
+    }
+    final revisions = <String, Map<String, dynamic>>{};
+    for (final entry in byMaterial.entries) {
+      final active = entry.value.cast<Map<String, dynamic>?>().firstWhere(
         (row) => row?['status'] == 'active',
-        orElse: () => rows.last,
+        orElse: () => entry.value.last,
       );
       if (active != null) {
-        revisions[materialId] = Map<String, dynamic>.from(active);
+        revisions[entry.key] = Map<String, dynamic>.from(active);
       }
     }
     return revisions;
@@ -323,33 +761,148 @@ class ProductionRepository extends BaseRepository {
   Future<Map<String, List<Map<String, dynamic>>>> _materialAttributeValues(
     Map<String, Map<String, dynamic>> materialRevisions,
   ) async {
-    final values = <String, List<Map<String, dynamic>>>{};
-    for (final entry in materialRevisions.entries) {
-      final revisionId = entry.value['id']?.toString();
-      if (revisionId == null || revisionId.isEmpty) continue;
-      final rows = await listTenant(
-        'material_revision_attribute_values',
-        filters: {'product_revision_id': revisionId},
-      );
-      values[entry.key] = rows;
+    final org = organizationId;
+    if (org == null) throw StateError('No hay una organización seleccionada.');
+    final revisionIds = materialRevisions.values
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final rows = await service.listIn(
+      'material_revision_attribute_values',
+      'product_revision_id',
+      revisionIds,
+      equals: {'organization_id': org},
+    );
+    final byRevision = <String, List<Map<String, dynamic>>>{};
+    for (final row in rows) {
+      final id = row['product_revision_id']?.toString();
+      if (id == null) continue;
+      byRevision.putIfAbsent(id, () => []).add(row);
     }
-    return values;
+    return {
+      for (final entry in materialRevisions.entries)
+        if ((entry.value['id']?.toString() ?? '').isNotEmpty)
+          entry.key: byRevision[entry.value['id'].toString()] ?? const [],
+    };
   }
 
   Future<Map<String, Map<String, dynamic>>> _materialAttributeDefinitions(
     Map<String, List<Map<String, dynamic>>> valuesByMaterial,
   ) async {
-    final definitions = <String, Map<String, dynamic>>{};
     final definitionIds = valuesByMaterial.values
         .expand((rows) => rows)
         .map((row) => row['attribute_definition_id']?.toString())
         .whereType<String>()
         .toSet();
-    for (final id in definitionIds) {
-      final row = await service.one('material_attribute_definitions', id);
-      if (row != null) definitions[id] = row;
-    }
+    final rows = await service.listIn(
+      'material_attribute_definitions',
+      'id',
+      definitionIds,
+    );
+    final definitions = {for (final row in rows) row['id'].toString(): row};
     return definitions;
+  }
+
+  /// Orders created before linking a route/BOM can have no revision assigned.
+  /// Preview their current active definitions without modifying the order.
+  Future<Map<String, dynamic>> _resolveManufacturingRevisions(
+    Map<String, dynamic> order,
+  ) async {
+    bool missing(String field) =>
+        (order[field]?.toString().trim() ?? '').isEmpty;
+    if (!missing('routing_revision_id') && !missing('bom_revision_id')) {
+      return order;
+    }
+    final productId = order['product_id']?.toString();
+    final organization = order['organization_id'] ?? organizationId;
+    if (productId == null || organization == null) return order;
+    final resolved = Map<String, dynamic>.from(order);
+    if (missing('bom_revision_id')) {
+      resolved['bom_revision_id'] = await _activeManufacturingRevision(
+        'boms',
+        'bom_revisions',
+        'bom_id',
+        {'organization_id': organization, 'product_id': productId},
+      );
+    }
+    if (missing('routing_revision_id')) {
+      var revisionId = await _activeManufacturingRevision(
+        'routings',
+        'routing_revisions',
+        'routing_id',
+        {'organization_id': organization, 'product_id': productId},
+      );
+      if (revisionId == null) {
+        final product = await service.one('products', productId);
+        final categoryId = product?['category_id']?.toString();
+        if (categoryId != null && categoryId.isNotEmpty) {
+          revisionId = await _activeManufacturingRevision(
+            'routings',
+            'routing_revisions',
+            'routing_id',
+            {'organization_id': organization, 'category_id': categoryId},
+          );
+        }
+      }
+      resolved['routing_revision_id'] = revisionId;
+    }
+    return resolved;
+  }
+
+  Future<String?> _activeManufacturingRevision(
+    String table,
+    String revisionTable,
+    String parentField,
+    Map<String, dynamic> filters,
+  ) async {
+    final heads = await service.list(
+      table,
+      equals: {...filters, 'is_active': true},
+      orderBy: 'created_at',
+      ascending: false,
+    );
+    heads.sort((a, b) {
+      final preferred = (b['is_default'] == true ? 1 : 0).compareTo(
+        a['is_default'] == true ? 1 : 0,
+      );
+      if (preferred != 0) return preferred;
+      final newest = (b['created_at']?.toString() ?? '').compareTo(
+        a['created_at']?.toString() ?? '',
+      );
+      return newest != 0
+          ? newest
+          : a['id'].toString().compareTo(b['id'].toString());
+    });
+    for (final head in heads) {
+      final revisions = await service.list(
+        revisionTable,
+        equals: {parentField: head['id'], 'status': 'active'},
+        orderBy: 'created_at',
+        ascending: false,
+      );
+      if (revisions.isNotEmpty) return revisions.first['id']?.toString();
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> _assignMissingManufacturingRevisions(
+    Map<String, dynamic> order,
+  ) async {
+    final resolved = await _resolveManufacturingRevisions(order);
+    final changes = <String, dynamic>{
+      for (final field in ['bom_revision_id', 'routing_revision_id'])
+        if (resolved[field] != null && resolved[field] != order[field])
+          field: resolved[field],
+    };
+    if (changes.isNotEmpty) {
+      await service.update(
+        'production_orders',
+        order['id'].toString(),
+        changes,
+      );
+    }
+    return resolved;
   }
 
   Future<List<Map<String, dynamic>>> _operationsFromRouting(
@@ -386,7 +939,7 @@ class ProductionRepository extends BaseRepository {
         'planned_quantity': plannedQuantity,
         'completed_quantity': 0,
         'rejected_quantity': 0,
-        'status': 'planned',
+        'status': 'ready',
         'instructions': row['instructions'],
         'notes': row['notes'],
       };
@@ -426,7 +979,7 @@ class ProductionRepository extends BaseRepository {
         'consumed_quantity': 0,
         'scrap_quantity': 0,
         'issue_method': row['issue_method'],
-        'status': 'planned',
+        'status': 'ready',
         'notes': row['notes'],
       };
     }).toList();
@@ -470,6 +1023,12 @@ class ProductionRepository extends BaseRepository {
   }
 
   Future<Map<String, dynamic>> prepare(String orderId) async {
+    final order = await service.one('production_orders', orderId);
+    if (order == null) throw StateError('Orden de producción no encontrada.');
+    if (!['draft', 'planned', 'ready'].contains(order['status']?.toString())) {
+      throw StateError('La OP no se puede preparar desde su estado actual.');
+    }
+    await _assignMissingManufacturingRevisions(order);
     await _alignOrderUomWithBom(orderId);
     try {
       final result = await service.rpc(
@@ -521,6 +1080,7 @@ class ProductionRepository extends BaseRepository {
       if (order == null) throw StateError('Orden de producción no encontrada.');
     }
 
+    order = await _assignMissingManufacturingRevisions(order);
     var operations = await service.list(
       'production_order_operations',
       equals: {'production_order_id': orderId},
@@ -585,7 +1145,7 @@ class ProductionRepository extends BaseRepository {
     if (materials.isEmpty) {
       final bomRevisionId = order['bom_revision_id']?.toString();
       if (bomRevisionId == null || bomRevisionId.isEmpty) {
-        throw StateError('La OP no tiene lista de materiales asignada.');
+        throw StateError('La OP no tiene estructura de fabricación asignada.');
       }
       final bomItems = await service.list(
         'bom_items',
@@ -648,17 +1208,48 @@ class ProductionRepository extends BaseRepository {
     });
   }
 
+  Future<void> deleteOrder(String orderId) async {
+    await service.rpc(
+      'delete_production_order',
+      params: {'p_order_id': orderId},
+    );
+  }
+
   Future<Map<String, dynamic>> transitionOrder(
     String orderId,
     String newStatus, {
     String? note,
     double? completedQuantity,
   }) async {
+    Map<String, dynamic>? operationalSnapshot;
+    // Ensure route operations have persisted UUIDs before the order enters
+    // production; detail() can otherwise synthesize temporary `routing:` IDs.
+    if (newStatus == 'in_progress') {
+      operationalSnapshot = await ensureOperationalSnapshot(orderId);
+    }
     final current =
         await service.one('v_production_order_workspace', orderId) ??
         await service.one('production_orders', orderId);
     if (current?['status']?.toString() == newStatus) {
       return current ?? <String, dynamic>{'id': orderId, 'status': newStatus};
+    }
+    if (newStatus == 'in_progress') {
+      final operations =
+          (operationalSnapshot?['operations'] as List? ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+            ..sort((a, b) => _compareOperationSequence(a, b));
+      final firstPending = operations.cast<Map<String, dynamic>?>().firstWhere(
+        (row) =>
+            row != null &&
+            !['completed', 'skipped', 'cancelled'].contains(row['status']),
+        orElse: () => null,
+      );
+      final machineId = firstPending?['machine_id']?.toString();
+      if (machineId != null && machineId.isNotEmpty) {
+        await _assertMachineAvailable(machineId, orderId);
+      }
     }
     final result = await service.rpc(
       'transition_production_order',
@@ -711,6 +1302,13 @@ class ProductionRepository extends BaseRepository {
       return current ??
           <String, dynamic>{'id': operationId, 'status': newStatus};
     }
+    if (newStatus == 'in_progress') {
+      final machineId = current?['machine_id']?.toString();
+      final orderId = current?['production_order_id']?.toString();
+      if (machineId != null && machineId.isNotEmpty && orderId != null) {
+        await _assertMachineAvailable(machineId, orderId);
+      }
+    }
     try {
       final result = await service.rpc(
         'transition_production_operation',
@@ -736,6 +1334,95 @@ class ProductionRepository extends BaseRepository {
     }
     return await service.one('production_order_operations', operationId) ??
         <String, dynamic>{'id': operationId, 'status': newStatus};
+  }
+
+  Future<void> _assertMachineAvailable(String machineId, String orderId) async {
+    final assigned = await service.list(
+      'production_order_operations',
+      equals: {'machine_id': machineId},
+      orderBy: 'sequence_no',
+    );
+    final candidates = assigned
+        .where(
+          (operation) =>
+              operation['production_order_id']?.toString() != orderId,
+        )
+        .toList();
+    final otherOrderIds = candidates
+        .map((operation) => operation['production_order_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    if (otherOrderIds.isEmpty) return;
+
+    final orders = await service.listIn(
+      'production_orders',
+      'id',
+      otherOrderIds,
+      select: 'id,op_number,status',
+    );
+    final ordersById = {for (final order in orders) '${order['id']}': order};
+    final relevantOrderIds = orders
+        .where(
+          (order) =>
+              ['ready', 'in_progress'].contains(order['status']?.toString()),
+        )
+        .map((order) => '${order['id']}')
+        .toSet();
+    final relevantOperations = await service.listIn(
+      'production_order_operations',
+      'production_order_id',
+      relevantOrderIds,
+      orderBy: 'sequence_no',
+    );
+    final operationsByOrder = <String, List<Map<String, dynamic>>>{};
+    for (final operation in relevantOperations) {
+      (operationsByOrder['${operation['production_order_id']}'] ??= []).add(
+        operation,
+      );
+    }
+    for (final operation in candidates) {
+      final otherOrderId = operation['production_order_id']?.toString();
+      final otherOrder = otherOrderId == null ? null : ordersById[otherOrderId];
+      if (otherOrder == null ||
+          ![
+            'ready',
+            'in_progress',
+          ].contains(otherOrder['status']?.toString())) {
+        continue;
+      }
+      final isExplicitlyRunning =
+          operation['status']?.toString() == 'in_progress';
+      final otherSteps = operationsByOrder[otherOrderId] ?? const [];
+      final currentStep = otherSteps.cast<Map<String, dynamic>?>().firstWhere(
+        (step) =>
+            step != null &&
+            !['completed', 'skipped', 'cancelled'].contains(step['status']),
+        orElse: () => null,
+      );
+      final isOrderCurrentMachine =
+          otherOrder['status']?.toString() == 'in_progress' &&
+          currentStep?['id']?.toString() == operation['id']?.toString();
+      if (!isExplicitlyRunning && !isOrderCurrentMachine) continue;
+
+      final machine = await service.one('machines', machineId, select: 'name');
+      final machineName = machine?['name']?.toString() ?? 'seleccionada';
+      final orderNumber = otherOrder['op_number']?.toString() ?? 'en ejecución';
+      throw ActionException(
+        'No se puede iniciar esta operación: la máquina $machineName ya está asignada a la orden $orderNumber. Libera esa máquina antes de continuar.',
+      );
+    }
+  }
+
+  int _compareOperationSequence(
+    Map<String, dynamic> left,
+    Map<String, dynamic> right,
+  ) {
+    final leftSequence = _number(left['sequence_no']);
+    final rightSequence = _number(right['sequence_no']);
+    final bySequence = leftSequence.compareTo(rightSequence);
+    return bySequence != 0
+        ? bySequence
+        : '${left['id']}'.compareTo('${right['id']}');
   }
 
   bool _canFallbackTransitionOperation(Object error) {

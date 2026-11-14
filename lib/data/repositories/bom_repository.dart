@@ -1,7 +1,7 @@
 import 'base_repository.dart';
 
 class BomRepository extends BaseRepository {
-  BomRepository(super.service, super.client);
+  BomRepository(super.service, super.client, {super.runtimeData});
 
   Future<String> createWithInitialRevision({
     required String productId,
@@ -9,7 +9,7 @@ class BomRepository extends BaseRepository {
     required String name,
     String? description,
     bool isDefault = false,
-    String revisionCode = 'Rev. 01',
+    String revisionCode = 'V.01',
     double outputQuantity = 1,
     String? outputUomId,
     String revisionStatus = 'draft',
@@ -48,6 +48,7 @@ class BomRepository extends BaseRepository {
     if (result == null) {
       throw StateError('No fue posible crear la estructura de fabricación.');
     }
+    runtimeData?.tablesChanged(['boms', 'bom_revisions']);
     return result.toString();
   }
 
@@ -132,29 +133,50 @@ class BomRepository extends BaseRepository {
       ascending: false,
     );
     final items = <String, List<Map<String, dynamic>>>{};
-    final substitutes = <String, List<Map<String, dynamic>>>{};
     for (final rev in revisions) {
       final revId = rev['id'] as String;
-      final rows = await service.list(
+      items[revId] = await service.list(
         'bom_items',
         equals: {'bom_revision_id': revId},
         orderBy: 'line_no',
       );
-      items[revId] = rows;
-      for (final row in rows) {
-        final id = row['id'] as String;
-        substitutes[id] = await service.list(
-          'bom_item_substitutes',
-          equals: {'bom_item_id': id},
-          orderBy: 'priority',
-        );
-      }
     }
-    return {
-      'bom': bom,
-      'revisions': revisions,
-      'items': items,
-      'substitutes': substitutes,
-    };
+    return {'bom': bom, 'revisions': revisions, 'items': items};
   }
+
+  Future<void> deleteBom(String bomId) async {
+    await service.rpc('delete_bom', params: {'p_bom_id': bomId});
+    runtimeData?.tablesChanged(['boms', 'bom_revisions']);
+  }
+}
+
+/// Returns the subset of [productIds] that do not have a BOM with an active
+/// revision — i.e. a BOM `prepare_production_order` can actually resolve.
+/// Pure and synchronous: callers fetch [boms] and [bomRevisions] once (e.g.
+/// via `LookupRepository.rows('boms')` / `.rows('bom_revisions')`) and reuse
+/// them across a whole screen instead of refetching per product.
+Set<String> productIdsMissingActiveBom(
+  Iterable<String> productIds, {
+  required List<Map<String, dynamic>> boms,
+  required List<Map<String, dynamic>> bomRevisions,
+}) {
+  final revisionsByBom = <String, List<Map<String, dynamic>>>{};
+  for (final rev in bomRevisions) {
+    final bomId = rev['bom_id']?.toString();
+    if (bomId != null) revisionsByBom.putIfAbsent(bomId, () => []).add(rev);
+  }
+  final productsWithActiveBom = <String>{};
+  for (final bom in boms) {
+    final productId = bom['product_id']?.toString();
+    final bomId = bom['id']?.toString();
+    if (productId == null || bomId == null) continue;
+    final hasActive = (revisionsByBom[bomId] ?? const []).any(
+      (rev) => rev['status']?.toString() == 'active',
+    );
+    if (hasActive) productsWithActiveBom.add(productId);
+  }
+  return {
+    for (final id in productIds)
+      if (!productsWithActiveBom.contains(id)) id,
+  };
 }

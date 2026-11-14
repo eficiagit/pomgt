@@ -1,5 +1,7 @@
 import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../core/config/supabase_config.dart';
 
 class DocumentStorageService {

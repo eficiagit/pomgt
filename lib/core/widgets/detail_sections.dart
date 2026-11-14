@@ -1,4 +1,8 @@
+import 'motion.dart';
+
 import 'package:flutter/material.dart';
+
+import '../theme/pomgt_theme.dart';
 
 class DetailSection {
   const DetailSection({
@@ -36,20 +40,25 @@ class _DetailSectionsState extends State<DetailSections> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
+    return PomgtTabController(
       length: widget.sections.length,
       initialIndex: selected,
       child: Column(
         children: [
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              for (final section in widget.sections) Tab(text: section.label),
-            ],
-            onTap: (index) => setState(() => selected = index),
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: PomgtColors.line)),
+            ),
+            child: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              dividerColor: Colors.transparent,
+              tabs: [
+                for (final section in widget.sections) Tab(text: section.label),
+              ],
+              onTap: (index) => setState(() => selected = index),
+            ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: ClipRect(
               child: TabBarView(

@@ -325,8 +325,7 @@ class Phase1Schema {
     'uom_categories': DbTableSpec(
       table: 'uom_categories',
       title: "Categorías de unidades",
-      description:
-          "Familias de unidades compatibles, por ejemplo cantidad, longitud, área o masa.",
+      description: "Familias de unidades compatibles, por ejemplo cantidad, longitud, área o masa.",
       displayFields: const ["code", "name"],
       readOnly: false,
       fields: const [
@@ -1296,8 +1295,7 @@ class Phase1Schema {
     'product_types': DbTableSpec(
       table: 'product_types',
       title: "Tipos de producto",
-      description:
-          "Tipos comerciales de producto que cada empresa puede crear y administrar.",
+      description: "Tipos comerciales de producto que cada empresa puede crear y administrar.",
       displayFields: const ["name", "code"],
       readOnly: false,
       fields: const [
@@ -1376,8 +1374,7 @@ class Phase1Schema {
     'material_types': DbTableSpec(
       table: 'material_types',
       title: "Tipos de material",
-      description:
-          "Tipos de material configurables como pintura, tinta, adhesivo o herramienta.",
+      description: "Tipos de material configurables como pintura, tinta, adhesivo o herramienta.",
       displayFields: const ["name", "code"],
       readOnly: false,
       fields: const [
@@ -1476,8 +1473,7 @@ class Phase1Schema {
     'products': DbTableSpec(
       table: 'products',
       title: "Productos",
-      description:
-          "Catálogo maestro de productos, subensambles, materiales, consumibles, empaques, herramientas y servicios.",
+      description: "Catálogo maestro de productos, subensambles, materiales, consumibles, empaques, herramientas y servicios.",
       displayFields: const ["sku", "name"],
       readOnly: false,
       fields: const [
@@ -1571,7 +1567,7 @@ class Phase1Schema {
           label: "Se fabrica",
           kind: DbFieldKind.booleanValue,
           required: true,
-          defaultValue: false,
+          defaultValue: true,
         ),
         DbFieldSpec(
           name: 'is_purchasable',
@@ -1654,7 +1650,7 @@ class Phase1Schema {
     ),
     'product_revisions': DbTableSpec(
       table: 'product_revisions',
-      title: "Revisiones de producto",
+      title: "Versiones de producto",
       description:
           "Versiones técnicas de un producto con especificaciones congeladas.",
       displayFields: const ["revision_code", "description"],
@@ -1683,13 +1679,13 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'revision_code',
-          label: "Código de revisión",
+          label: "Código de versión",
           kind: DbFieldKind.textValue,
           required: true,
         ),
         DbFieldSpec(
           name: 'revision_no',
-          label: "Número de revisión",
+          label: "Número de versión",
           kind: DbFieldKind.integerValue,
           required: true,
           defaultValue: 1,
@@ -2032,7 +2028,7 @@ class Phase1Schema {
     'material_revision_attribute_values': DbTableSpec(
       table: 'material_revision_attribute_values',
       title: "Valores técnicos de material",
-      description: "Valores técnicos versionados por revisión de producto.",
+      description: "Valores técnicos versionados por versión de producto.",
       displayFields: const ["value_text"],
       fields: const [
         DbFieldSpec(
@@ -2051,7 +2047,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión",
+          label: "Versión",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'product_revisions',
@@ -2093,7 +2089,7 @@ class Phase1Schema {
     'product_tolerances': DbTableSpec(
       table: 'product_tolerances',
       title: "Tolerancias del producto",
-      description: "Tolerancias medibles asociadas a una revisión de producto.",
+      description: "Tolerancias medibles asociadas a una versión de producto.",
       displayFields: const ["attribute_name"],
       readOnly: false,
       fields: const [
@@ -2113,7 +2109,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'product_revisions',
@@ -2338,8 +2334,8 @@ class Phase1Schema {
     ),
     'product_revision_custom_values': DbTableSpec(
       table: 'product_revision_custom_values',
-      title: "Valores personalizados de revisión",
-      description: "Valores de campos personalizados para una revisión.",
+      title: "Valores personalizados de versión",
+      description: "Valores de campos personalizados para una versión.",
       displayFields: const ["value_text"],
       readOnly: false,
       fields: const [
@@ -2352,7 +2348,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'product_revisions',
@@ -2444,7 +2440,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'default_revision_id',
-          label: "Revisión predeterminada",
+          label: "Versión predeterminada",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
@@ -2493,8 +2489,7 @@ class Phase1Schema {
     'customer_requirements': DbTableSpec(
       table: 'customer_requirements',
       title: "Requisitos del cliente",
-      description:
-          "Especificaciones, instrucciones, procesos especiales, calidad y empaque requeridos por el cliente.",
+      description: "Especificaciones, instrucciones, procesos especiales, calidad y empaque requeridos por el cliente.",
       displayFields: const ["title"],
       readOnly: false,
       fields: const [
@@ -2561,7 +2556,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'revision_label',
-          label: "Etiqueta de revisión",
+          label: "Etiqueta de versión",
           kind: DbFieldKind.textValue,
         ),
         DbFieldSpec(
@@ -2681,7 +2676,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'product_revisions',
@@ -2771,8 +2766,7 @@ class Phase1Schema {
     'customer_orders': DbTableSpec(
       table: 'customer_orders',
       title: "Pedidos",
-      description:
-          "Necesidades de producción provenientes de pedido, OC, orden interna, pronóstico o reposición.",
+      description: "Necesidades de producción provenientes de pedido, OC, orden interna, pronóstico o reposición.",
       displayFields: const ["order_number", "customer_po_number"],
       readOnly: false,
       fields: const [
@@ -3156,7 +3150,7 @@ class Phase1Schema {
     ),
     'bom_revisions': DbTableSpec(
       table: 'bom_revisions',
-      title: "Revisiones de estructura de fabricación",
+      title: "Versiones de estructura de fabricación",
       description:
           "Versiones históricas o vigentes de una estructura de fabricación.",
       displayFields: const ["revision_code"],
@@ -3185,7 +3179,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'revision_code',
-          label: "Código de revisión",
+          label: "Código de versión",
           kind: DbFieldKind.textValue,
           required: true,
         ),
@@ -3269,8 +3263,7 @@ class Phase1Schema {
     'bom_items': DbTableSpec(
       table: 'bom_items',
       title: "Componentes de la estructura de fabricación",
-      description:
-          "Materiales, subensambles, consumibles y empaques requeridos por una revisión.",
+      description: "Materiales, subensambles, consumibles y empaques requeridos por una versión.",
       displayFields: const ["line_no", "component_type"],
       readOnly: false,
       fields: const [
@@ -3290,7 +3283,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'bom_revision_id',
-          label: "Revisión de estructura de fabricación",
+          label: "Versión de estructura de fabricación",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'bom_revisions',
@@ -3323,13 +3316,13 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'component_product_revision_id',
-          label: "Revisión del componente",
+          label: "Versión del componente",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
         DbFieldSpec(
           name: 'child_bom_revision_id',
-          label: "Revisión de estructura de fabricación del subensamble",
+          label: "Versión de estructura de fabricación del subensamble",
           kind: DbFieldKind.reference,
           referenceTable: 'bom_revisions',
         ),
@@ -3410,96 +3403,6 @@ class Phase1Schema {
         DbFieldSpec(
           name: 'updated_at',
           label: "Última actualización",
-          kind: DbFieldKind.dateTimeValue,
-          required: true,
-          hidden: true,
-          readOnly: true,
-        ),
-      ],
-    ),
-    'bom_item_substitutes': DbTableSpec(
-      table: 'bom_item_substitutes',
-      title: "Sustitutos de material",
-      description: "Alternativas permitidas para un material o componente.",
-      displayFields: const ["priority"],
-      readOnly: false,
-      fields: const [
-        DbFieldSpec(
-          name: 'id',
-          label: "Identificador",
-          kind: DbFieldKind.textValue,
-          hidden: true,
-          readOnly: true,
-        ),
-        DbFieldSpec(
-          name: 'organization_id',
-          label: "Organización",
-          kind: DbFieldKind.reference,
-          hidden: true,
-          referenceTable: 'organizations',
-        ),
-        DbFieldSpec(
-          name: 'bom_item_id',
-          label: "Componente de la estructura",
-          kind: DbFieldKind.reference,
-          required: true,
-          referenceTable: 'bom_items',
-        ),
-        DbFieldSpec(
-          name: 'substitute_product_id',
-          label: "Material sustituto",
-          kind: DbFieldKind.reference,
-          required: true,
-          referenceTable: 'products',
-        ),
-        DbFieldSpec(
-          name: 'substitute_product_revision_id',
-          label: "Revisión del sustituto",
-          kind: DbFieldKind.reference,
-          referenceTable: 'product_revisions',
-        ),
-        DbFieldSpec(
-          name: 'priority',
-          label: "Prioridad",
-          kind: DbFieldKind.integerValue,
-          required: true,
-          defaultValue: 1,
-        ),
-        DbFieldSpec(
-          name: 'conversion_ratio',
-          label: "Relación de conversión",
-          kind: DbFieldKind.numberValue,
-          required: true,
-          defaultValue: 1,
-        ),
-        DbFieldSpec(
-          name: 'max_share_pct',
-          label: "Participación máxima (%)",
-          kind: DbFieldKind.numberValue,
-          required: true,
-          defaultValue: 100,
-        ),
-        DbFieldSpec(
-          name: 'approval_required',
-          label: "Requiere aprobación",
-          kind: DbFieldKind.booleanValue,
-          required: true,
-          defaultValue: false,
-        ),
-        DbFieldSpec(
-          name: 'valid_from',
-          label: "Válido desde",
-          kind: DbFieldKind.dateValue,
-        ),
-        DbFieldSpec(
-          name: 'valid_to',
-          label: "Válido hasta",
-          kind: DbFieldKind.dateValue,
-        ),
-        DbFieldSpec(name: 'notes', label: "Notas", kind: DbFieldKind.textValue),
-        DbFieldSpec(
-          name: 'created_at',
-          label: "Fecha de creación",
           kind: DbFieldKind.dateTimeValue,
           required: true,
           hidden: true,
@@ -3591,10 +3494,136 @@ class Phase1Schema {
         ),
       ],
     ),
+    'machine_categories': DbTableSpec(
+      table: 'machine_categories',
+      title: "Categorías de máquina",
+      description: "Áreas o departamentos usados para agrupar máquinas y equipo, por ejemplo producción, almacén o administración.",
+      displayFields: const ["name"],
+      readOnly: false,
+      fields: const [
+        DbFieldSpec(
+          name: 'id',
+          label: "Identificador",
+          kind: DbFieldKind.textValue,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'organization_id',
+          label: "Organización",
+          kind: DbFieldKind.reference,
+          hidden: true,
+          referenceTable: 'organizations',
+        ),
+        DbFieldSpec(
+          name: 'code',
+          label: "Código",
+          kind: DbFieldKind.textValue,
+          required: true,
+        ),
+        DbFieldSpec(
+          name: 'name',
+          label: "Nombre",
+          kind: DbFieldKind.textValue,
+          required: true,
+        ),
+        DbFieldSpec(
+          name: 'description',
+          label: "Descripción",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'is_active',
+          label: "Activo",
+          kind: DbFieldKind.booleanValue,
+          required: true,
+          defaultValue: true,
+        ),
+        DbFieldSpec(
+          name: 'created_at',
+          label: "Fecha de creación",
+          kind: DbFieldKind.dateTimeValue,
+          required: true,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'updated_at',
+          label: "Última actualización",
+          kind: DbFieldKind.dateTimeValue,
+          required: true,
+          hidden: true,
+          readOnly: true,
+        ),
+      ],
+    ),
+    'machine_types': DbTableSpec(
+      table: 'machine_types',
+      title: "Tipos de máquina",
+      description: "Clasificación técnica de las máquinas y equipo, por ejemplo impresora de etiquetas, mobiliario o herramienta eléctrica.",
+      displayFields: const ["name"],
+      readOnly: false,
+      fields: const [
+        DbFieldSpec(
+          name: 'id',
+          label: "Identificador",
+          kind: DbFieldKind.textValue,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'organization_id',
+          label: "Organización",
+          kind: DbFieldKind.reference,
+          hidden: true,
+          referenceTable: 'organizations',
+        ),
+        DbFieldSpec(
+          name: 'code',
+          label: "Código",
+          kind: DbFieldKind.textValue,
+          required: true,
+        ),
+        DbFieldSpec(
+          name: 'name',
+          label: "Nombre",
+          kind: DbFieldKind.textValue,
+          required: true,
+        ),
+        DbFieldSpec(
+          name: 'description',
+          label: "Descripción",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'is_active',
+          label: "Activo",
+          kind: DbFieldKind.booleanValue,
+          required: true,
+          defaultValue: true,
+        ),
+        DbFieldSpec(
+          name: 'created_at',
+          label: "Fecha de creación",
+          kind: DbFieldKind.dateTimeValue,
+          required: true,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'updated_at',
+          label: "Última actualización",
+          kind: DbFieldKind.dateTimeValue,
+          required: true,
+          hidden: true,
+          readOnly: true,
+        ),
+      ],
+    ),
     'machines': DbTableSpec(
       table: 'machines',
       title: "Máquinas",
-      description: "Equipos disponibles en los centros de trabajo.",
+      description: "Inventario de máquinas y equipo de producción, vinculable a los pasos de las rutas de fabricación.",
       displayFields: const ["machine_code", "name"],
       readOnly: false,
       fields: const [
@@ -3613,28 +3642,16 @@ class Phase1Schema {
           referenceTable: 'organizations',
         ),
         DbFieldSpec(
-          name: 'work_center_id',
-          label: "Centro de trabajo",
-          kind: DbFieldKind.reference,
-          required: true,
-          referenceTable: 'work_centers',
-        ),
-        DbFieldSpec(
           name: 'machine_code',
-          label: "Código de máquina",
+          label: "No. de inventario",
           kind: DbFieldKind.textValue,
           required: true,
         ),
         DbFieldSpec(
           name: 'name',
-          label: "Nombre",
+          label: "Equipo",
           kind: DbFieldKind.textValue,
           required: true,
-        ),
-        DbFieldSpec(
-          name: 'description',
-          label: "Descripción",
-          kind: DbFieldKind.textValue,
         ),
         DbFieldSpec(
           name: 'manufacturer',
@@ -3648,7 +3665,29 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'serial_number',
-          label: "Número de serie",
+          label: "Serie",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'machine_type_id',
+          label: "Tipo",
+          kind: DbFieldKind.reference,
+          referenceTable: 'machine_types',
+        ),
+        DbFieldSpec(
+          name: 'category_id',
+          label: "Categoría",
+          kind: DbFieldKind.reference,
+          referenceTable: 'machine_categories',
+        ),
+        DbFieldSpec(
+          name: 'capacity',
+          label: "Capacidad",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'voltage',
+          label: "Voltaje",
           kind: DbFieldKind.textValue,
         ),
         DbFieldSpec(
@@ -3665,6 +3704,22 @@ class Phase1Schema {
             "inactive",
           ],
           defaultValue: 'available',
+        ),
+        DbFieldSpec(
+          name: 'description',
+          label: "Detalles",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'location',
+          label: "Ubicación",
+          kind: DbFieldKind.textValue,
+        ),
+        DbFieldSpec(
+          name: 'work_center_id',
+          label: "Centro de trabajo",
+          kind: DbFieldKind.reference,
+          referenceTable: 'work_centers',
         ),
         DbFieldSpec(
           name: 'hourly_cost',
@@ -3684,7 +3739,6 @@ class Phase1Schema {
           name: 'currency_code',
           label: "Moneda",
           kind: DbFieldKind.textValue,
-          required: true,
           referenceTable: 'currencies',
           referenceColumn: 'code',
         ),
@@ -3694,6 +3748,20 @@ class Phase1Schema {
           kind: DbFieldKind.booleanValue,
           required: true,
           defaultValue: true,
+        ),
+        // Reference-only position on the "Mapa de planta" floor map - set by
+        // dragging the machine's icon there, not edited by hand here.
+        DbFieldSpec(
+          name: 'floor_pos_x',
+          label: "Posición X (mapa)",
+          kind: DbFieldKind.numberValue,
+          hidden: true,
+        ),
+        DbFieldSpec(
+          name: 'floor_pos_y',
+          label: "Posición Y (mapa)",
+          kind: DbFieldKind.numberValue,
+          hidden: true,
         ),
         DbFieldSpec(
           name: 'created_at',
@@ -3989,8 +4057,15 @@ class Phase1Schema {
           name: 'product_id',
           label: "Producto",
           kind: DbFieldKind.reference,
-          required: true,
           referenceTable: 'products',
+          help: 'Deja esto vacío si la ruta es por categoría en vez de por producto específico.',
+        ),
+        DbFieldSpec(
+          name: 'category_id',
+          label: "Categoría",
+          kind: DbFieldKind.reference,
+          referenceTable: 'product_categories',
+          help: 'Ruta por categoría: se vuelve la ruta predeterminada de cualquier producto de esta categoría que no tenga una ruta propia asignada.',
         ),
         DbFieldSpec(
           name: 'routing_code',
@@ -4043,7 +4118,7 @@ class Phase1Schema {
     ),
     'routing_revisions': DbTableSpec(
       table: 'routing_revisions',
-      title: "Revisiones de ruta de fabricación",
+      title: "Versiones de ruta de fabricación",
       description: "Versiones de una ruta de fabricación.",
       displayFields: const ["revision_code"],
       readOnly: false,
@@ -4071,7 +4146,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'revision_code',
-          label: "Código de revisión",
+          label: "Código de versión",
           kind: DbFieldKind.textValue,
           required: true,
         ),
@@ -4127,8 +4202,7 @@ class Phase1Schema {
     'routing_operations': DbTableSpec(
       table: 'routing_operations',
       title: "Pasos de fabricación",
-      description:
-          "Secuencia flexible de actividades, consumo de materiales, controles y empaque.",
+      description: "Secuencia flexible de actividades, consumo de materiales, controles y empaque.",
       displayFields: const ["sequence_no", "name"],
       readOnly: false,
       fields: const [
@@ -4148,7 +4222,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'routing_revision_id',
-          label: "Revisión de ruta",
+          label: "Versión de ruta",
           kind: DbFieldKind.reference,
           required: true,
           referenceTable: 'routing_revisions',
@@ -4201,6 +4275,12 @@ class Phase1Schema {
           label: "Centro de trabajo",
           kind: DbFieldKind.reference,
           referenceTable: 'work_centers',
+        ),
+        DbFieldSpec(
+          name: 'machine_type_id',
+          label: "Tipo de máquina",
+          kind: DbFieldKind.reference,
+          referenceTable: 'machine_types',
         ),
         DbFieldSpec(
           name: 'preferred_machine_id',
@@ -4428,9 +4508,17 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'material_product_id',
-          label: "Material",
+          label: "Material específico",
           kind: DbFieldKind.reference,
           referenceTable: 'products',
+          help: 'Deja esto vacío si vas a asignar por tipo de material en vez de un material puntual — útil para rutas por categoría, donde cada producto resuelve el tipo contra su propia estructura de fabricación.',
+        ),
+        DbFieldSpec(
+          name: 'material_type_id',
+          label: "Tipo de material",
+          kind: DbFieldKind.reference,
+          referenceTable: 'material_types',
+          help: 'En vez de un material puntual: cualquier material de este tipo. Al ejecutar la orden, se resuelve contra la estructura de fabricación del producto específico.',
         ),
         DbFieldSpec(
           name: 'quantity_override',
@@ -5044,8 +5132,7 @@ class Phase1Schema {
     'production_orders': DbTableSpec(
       table: 'production_orders',
       title: "Órdenes de producción",
-      description:
-          "Órdenes de producción generadas desde pedidos o necesidades internas.",
+      description: "Órdenes de producción generadas desde pedidos o necesidades internas.",
       displayFields: const ["op_number"],
       readOnly: false,
       fields: const [
@@ -5078,19 +5165,19 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
         DbFieldSpec(
           name: 'bom_revision_id',
-          label: "Revisión de estructura de fabricación",
+          label: "Versión de estructura de fabricación",
           kind: DbFieldKind.reference,
           referenceTable: 'bom_revisions',
         ),
         DbFieldSpec(
           name: 'routing_revision_id',
-          label: "Revisión de ruta",
+          label: "Versión de ruta",
           kind: DbFieldKind.reference,
           referenceTable: 'routing_revisions',
         ),
@@ -5248,6 +5335,60 @@ class Phase1Schema {
         DbFieldSpec(
           name: 'created_at',
           label: "Fecha de creación",
+          kind: DbFieldKind.dateTimeValue,
+          required: true,
+          hidden: true,
+          readOnly: true,
+        ),
+      ],
+    ),
+    'production_order_operators': DbTableSpec(
+      table: 'production_order_operators',
+      title: "Operadores asignados",
+      description: "Operadores asignados a una orden de producción.",
+      displayFields: const ["role"],
+      readOnly: false,
+      fields: const [
+        DbFieldSpec(
+          name: 'id',
+          label: "Identificador",
+          kind: DbFieldKind.textValue,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'organization_id',
+          label: "Organización",
+          kind: DbFieldKind.reference,
+          hidden: true,
+          referenceTable: 'organizations',
+        ),
+        DbFieldSpec(
+          name: 'production_order_id',
+          label: "Orden de producción",
+          kind: DbFieldKind.reference,
+          required: true,
+          referenceTable: 'production_orders',
+        ),
+        DbFieldSpec(
+          name: 'member_id',
+          label: "Operador",
+          kind: DbFieldKind.reference,
+          required: true,
+          referenceTable: 'organization_members',
+        ),
+        DbFieldSpec(
+          name: 'role',
+          label: "Rol en la orden",
+          kind: DbFieldKind.enumValue,
+          required: true,
+          enumValues: const ["operator", "lead"],
+          defaultValue: 'operator',
+        ),
+        DbFieldSpec(name: 'notes', label: "Notas", kind: DbFieldKind.textValue),
+        DbFieldSpec(
+          name: 'created_at',
+          label: "Fecha de asignación",
           kind: DbFieldKind.dateTimeValue,
           required: true,
           hidden: true,
@@ -5533,7 +5674,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
@@ -5750,7 +5891,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
@@ -5920,7 +6061,7 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'product_revision_id',
-          label: "Revisión de producto",
+          label: "Versión de producto",
           kind: DbFieldKind.reference,
           referenceTable: 'product_revisions',
         ),
@@ -5938,13 +6079,13 @@ class Phase1Schema {
         ),
         DbFieldSpec(
           name: 'bom_revision_id',
-          label: "Revisión de estructura de fabricación",
+          label: "Versión de estructura de fabricación",
           kind: DbFieldKind.reference,
           referenceTable: 'bom_revisions',
         ),
         DbFieldSpec(
           name: 'routing_revision_id',
-          label: "Revisión de ruta",
+          label: "Versión de ruta",
           kind: DbFieldKind.reference,
           referenceTable: 'routing_revisions',
         ),
@@ -5990,6 +6131,72 @@ class Phase1Schema {
           kind: DbFieldKind.dateTimeValue,
           required: true,
           hidden: true,
+          readOnly: true,
+        ),
+      ],
+    ),
+    'audit_log': DbTableSpec(
+      table: 'audit_log',
+      title: "Auditoría",
+      description: "Bitácora automática de altas, cambios y bajas en las tablas principales del sistema.",
+      displayFields: const ["table_name", "action"],
+      readOnly: true,
+      fields: const [
+        DbFieldSpec(
+          name: 'id',
+          label: "Identificador",
+          kind: DbFieldKind.textValue,
+          hidden: true,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'organization_id',
+          label: "Organización",
+          kind: DbFieldKind.reference,
+          hidden: true,
+          referenceTable: 'organizations',
+        ),
+        DbFieldSpec(
+          name: 'table_name',
+          label: "Tabla",
+          kind: DbFieldKind.textValue,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'record_id',
+          label: "Registro",
+          kind: DbFieldKind.textValue,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'action',
+          label: "Acción",
+          kind: DbFieldKind.enumValue,
+          enumValues: const ["insert", "update", "delete"],
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'changed_by',
+          label: "Usuario",
+          kind: DbFieldKind.textValue,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'changed_at',
+          label: "Fecha",
+          kind: DbFieldKind.dateTimeValue,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'old_data',
+          label: "Datos anteriores",
+          kind: DbFieldKind.jsonValue,
+          readOnly: true,
+        ),
+        DbFieldSpec(
+          name: 'new_data',
+          label: "Datos nuevos",
+          kind: DbFieldKind.jsonValue,
           readOnly: true,
         ),
       ],

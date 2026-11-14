@@ -1,5 +1,9 @@
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/entity_crud_panel.dart';
@@ -9,6 +13,7 @@ import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import 'material_types_admin.dart';
+import '../../core/widgets/section_title.dart';
 
 class MasterDataScreen extends StatelessWidget {
   const MasterDataScreen({super.key});
@@ -17,14 +22,12 @@ class MasterDataScreen extends StatelessWidget {
     ModuleTable(
       'organizations',
       label: 'Organización',
-      help:
-          'Datos de la empresa actual, país, zona horaria, idioma/región y moneda predeterminada.',
+      help: 'Datos de la empresa actual, país, zona horaria, idioma/región y moneda predeterminada.',
     ),
     ModuleTable(
       'organization_members',
       label: 'Miembros',
-      help:
-          'Usuarios asociados a la organización. Los permisos finales se aplican con autenticación y políticas de acceso por registro.',
+      help: 'Usuarios asociados a la organización. Los permisos finales se aplican con autenticación y políticas de acceso por registro.',
     ),
     ModuleTable(
       'currencies',
@@ -34,26 +37,22 @@ class MasterDataScreen extends StatelessWidget {
     ModuleTable(
       'payment_terms',
       label: 'Condiciones de pago',
-      help:
-          'Días de crédito y descuentos por pronto pago reutilizados por clientes y pedidos.',
+      help: 'Días de crédito y descuentos por pronto pago reutilizados por clientes y pedidos.',
     ),
     ModuleTable(
       'uom_categories',
       label: 'Categorías de unidades',
-      help:
-          'Familias de unidades compatibles, por ejemplo cantidad, longitud, área o masa.',
+      help: 'Familias de unidades compatibles, por ejemplo cantidad, longitud, área o masa.',
     ),
     ModuleTable(
       'units_of_measure',
       label: 'Unidades de medida',
-      help:
-          'Unidades y factor de conversión respecto a la unidad base de su categoría.',
+      help: 'Unidades y factor de conversión respecto a la unidad base de su categoría.',
     ),
     ModuleTable(
       'product_categories',
       label: 'Categorías de producto',
-      help:
-          'Clasificación simple utilizada solo en el catálogo de productos. Incluye icono.',
+      help: 'Clasificación simple utilizada solo en el catálogo de productos. Incluye icono.',
     ),
     ModuleTable(
       'material_categories',
@@ -64,8 +63,7 @@ class MasterDataScreen extends StatelessWidget {
     ModuleTable(
       'product_types',
       label: 'Tipos de producto',
-      help:
-          'Tipos configurables como producto terminado, pieza especial o cualquier clasificación comercial propia de la empresa.',
+      help: 'Tipos configurables como producto terminado, pieza especial o cualquier clasificación comercial propia de la empresa.',
     ),
     ModuleTable(
       'material_types',
@@ -74,16 +72,30 @@ class MasterDataScreen extends StatelessWidget {
           'Tipos definidos por la empresa y sus atributos técnicos dinámicos.',
     ),
     ModuleTable(
+      'machine_categories',
+      label: 'Categorías de máquina',
+      help: 'Áreas o departamentos usados para agrupar máquinas y equipo, por ejemplo producción, almacén o administración.',
+    ),
+    ModuleTable(
+      'machine_types',
+      label: 'Tipos de máquina',
+      help: 'Clasificación técnica de las máquinas y equipo, por ejemplo impresora de etiquetas, mobiliario o herramienta eléctrica.',
+    ),
+    ModuleTable(
+      'machines',
+      label: 'Máquinas',
+      help: 'Inventario de máquinas y equipo de producción, vinculable a los pasos de las rutas de fabricación.',
+    ),
+    ModuleTable(
       'number_sequences',
       label: 'Foliadores',
-      help:
-          'Secuencias automáticas utilizadas para clientes, pedidos, órdenes de producción, entregas, reclamaciones y no conformidades.',
+      help: 'Secuencias automáticas utilizadas para clientes, pedidos, órdenes de producción, entregas, reclamaciones y no conformidades.',
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
+    return PomgtTabController(
       length: _tables.length,
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -107,15 +119,9 @@ class MasterDataScreen extends StatelessWidget {
                       constraints: BoxConstraints(
                         maxWidth: compact ? constraints.maxWidth - 40 : 520,
                       ),
-                      child: Text(
+                      child: const SectionTitle(
                         'Datos maestros',
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: PomgtColors.ink,
-                              letterSpacing: 0,
-                            ),
+                        icon: LucideIcons.slidersHorizontal,
                       ),
                     ),
                     const InfoTip(
@@ -126,24 +132,21 @@ class MasterDataScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: PomgtColors.surfaceAlt,
-                    borderRadius: PomgtRadii.borderSm,
+                  decoration: const BoxDecoration(
+                    border: Border(bottom: BorderSide(color: PomgtColors.line)),
                   ),
                   child: TabBar(
                     isScrollable: true,
                     tabAlignment: TabAlignment.start,
                     dividerColor: Colors.transparent,
                     indicatorColor: PomgtColors.blue,
-                    indicator: const BoxDecoration(
-                      color: PomgtColors.canvas,
-                      borderRadius: PomgtRadii.borderSm,
-                    ),
                     indicatorSize: TabBarIndicatorSize.tab,
                     labelColor: PomgtColors.ink,
                     unselectedLabelColor: PomgtColors.muted,
-                    labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    labelStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13.5,
+                    ),
                     tabs: _tables.map((t) {
                       final spec = Phase1Schema.tables[t.table];
                       final label =
@@ -176,6 +179,7 @@ class MasterDataScreen extends StatelessWidget {
                         repository: context.read<GenericRepository>(),
                         lookups: context.read<LookupRepository>(),
                         description: t.help,
+                        tableView: true,
                       );
                     }).toList(),
                   ),

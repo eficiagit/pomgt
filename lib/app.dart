@@ -1,13 +1,16 @@
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'controllers/auth_controller.dart';
 import 'controllers/feature_controllers.dart';
 import 'controllers/navigation_controller.dart';
 import 'controllers/organization_controller.dart';
 import 'controllers/runtime_data_controller.dart';
 import 'core/theme/pomgt_theme.dart';
+import 'core/theme/component_theme.dart';
 import 'core/widgets/app_shell.dart';
 import 'data/repositories/base_repository.dart';
 import 'data/repositories/bom_repository.dart';
@@ -18,6 +21,7 @@ import 'data/repositories/lookup_repository.dart';
 import 'data/repositories/material_repository.dart';
 import 'data/repositories/order_repository.dart';
 import 'data/repositories/product_repository.dart';
+import 'data/repositories/roles_repository.dart';
 import 'data/repositories/routing_repository.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/document_storage_service.dart';
@@ -44,6 +48,7 @@ class _PomgtAppState extends State<PomgtApp> {
   late final BomRepository boms;
   late final RoutingRepository routings;
   late final DocumentRepository documents;
+  late final RolesRepository roles;
   late final LookupRepository lookups;
   late final RuntimeDataController runtimeData;
   late final AuthController authController;
@@ -58,13 +63,14 @@ class _PomgtAppState extends State<PomgtApp> {
     storage = DocumentStorageService(client);
     runtimeData = RuntimeDataController();
     generic = GenericRepository(db, client, runtimeData: runtimeData);
-    customers = CustomerRepository(db, client);
+    customers = CustomerRepository(db, client, runtimeData: runtimeData);
     orders = OrderRepository(db, client);
-    products = ProductRepository(db, client);
-    materials = MaterialRepository(db, client);
-    boms = BomRepository(db, client);
-    routings = RoutingRepository(db, client);
+    products = ProductRepository(db, client, runtimeData: runtimeData);
+    materials = MaterialRepository(db, client, runtimeData: runtimeData);
+    boms = BomRepository(db, client, runtimeData: runtimeData);
+    routings = RoutingRepository(db, client, runtimeData: runtimeData);
     documents = DocumentRepository(db, client, storage);
+    roles = RolesRepository(db, client);
     lookups = LookupRepository(generic, runtimeData);
     final tenantRepos = <BaseRepository>[
       generic,
@@ -75,6 +81,7 @@ class _PomgtAppState extends State<PomgtApp> {
       boms,
       routings,
       documents,
+      roles,
     ];
     authController = AuthController(authService);
     organizationController = OrganizationController(db, tenantRepos);
@@ -102,6 +109,7 @@ class _PomgtAppState extends State<PomgtApp> {
         Provider.value(value: boms),
         Provider.value(value: routings),
         Provider.value(value: documents),
+        Provider.value(value: roles),
         Provider.value(value: lookups),
         ChangeNotifierProvider.value(value: runtimeData),
         ChangeNotifierProvider.value(value: authController),
@@ -120,6 +128,7 @@ class _PomgtAppState extends State<PomgtApp> {
         debugShowCheckedModeBanner: false,
         title: 'POMGT',
         theme: buildPomgtTheme(),
+        builder: (context, child) => PomgtComponentTheme(child: child!),
         locale: const Locale('es', 'MX'),
         supportedLocales: const [Locale('es', 'MX'), Locale('es')],
         localizationsDelegates: const [
@@ -182,7 +191,7 @@ class _AppGateState extends State<_AppGate> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(
-                    Icons.error_outline_rounded,
+                    LucideIcons.circleAlert,
                     size: 34,
                     color: PomgtColors.danger,
                   ),

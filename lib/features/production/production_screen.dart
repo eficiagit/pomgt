@@ -1,27 +1,46 @@
-import 'dart:async';
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/cupertino.dart';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/organization_controller.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
+import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/pdf_download.dart';
 import '../../core/utils/ui_copy.dart';
+import '../../core/widgets/categorized_picker.dart';
+import '../../core/widgets/number_input.dart';
+import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/entity_crud_panel.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../core/widgets/info_tip.dart';
 import '../../core/widgets/linked_documents_panel.dart';
+import '../../core/widgets/selected_product_row.dart';
 import '../../data/phase1_schema.dart';
+import '../../data/repositories/bom_repository.dart';
 import '../../data/repositories/document_repository.dart';
 import '../../data/repositories/generic_repository.dart';
 import '../../data/repositories/lookup_repository.dart';
 import '../../data/repositories/production_repository.dart';
+import '../../data/repositories/roles_repository.dart';
+import '../../data/repositories/routing_repository.dart';
+import '../bom/link_bom_dialog.dart';
+import '../routings/link_routing_dialog.dart';
 import '../../data/services/production_order_pdf_service.dart';
 import 'production_operator_display.dart' show ProductionOperatorDisplay;
+import '../../core/widgets/section_title.dart';
+import '../../core/widgets/pomgt_date_picker.dart';
 
 void _showProductionNotice(
   BuildContext context, {
@@ -29,114 +48,14 @@ void _showProductionNotice(
   required String description,
   bool isError = false,
 }) {
-  final overlay = Overlay.maybeOf(context, rootOverlay: true);
-  if (overlay == null) return;
-
-  late final OverlayEntry entry;
-  Timer? timer;
-  void close() {
-    timer?.cancel();
-    if (entry.mounted) entry.remove();
-  }
-
-  entry = OverlayEntry(
-    builder: (context) {
-      final media = MediaQuery.of(context);
-      final width = media.size.width < 480 ? media.size.width - 28 : 420.0;
-      return Positioned(
-        top: media.padding.top + 18,
-        right: 14,
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          builder: (context, value, child) {
-            return Opacity(
-              opacity: value,
-              child: Transform.translate(
-                offset: Offset((1 - value) * 18, 0),
-                child: child,
-              ),
-            );
-          },
-          child: Material(
-            color: Colors.transparent,
-            child: ConstrainedBox(
-              constraints: BoxConstraints.tightFor(width: width),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: PomgtColors.ink,
-                  border: Border.all(
-                    color: (isError ? PomgtColors.danger : PomgtColors.blue)
-                        .withValues(alpha: .35),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        isError
-                            ? CupertinoIcons.exclamationmark_triangle_fill
-                            : CupertinoIcons.bell_fill,
-                        color: isError ? PomgtColors.rose : PomgtColors.blue,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              title,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              description,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: PomgtColors.subtle,
-                                fontSize: 13,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Tooltip(
-                        message: 'Cerrar',
-                        child: IconButton(
-                          onPressed: close,
-                          icon: const Icon(CupertinoIcons.xmark, size: 16),
-                          color: Colors.white,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 32,
-                            height: 32,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    },
+  // Delegates to the shared flat-style toast used across the app instead of
+  // keeping a bespoke dark overlay implementation here.
+  showPomgtNotice(
+    context,
+    title: title,
+    description: description,
+    isError: isError,
   );
-
-  overlay.insert(entry);
-  timer = Timer(const Duration(seconds: 4), close);
 }
 
 void _showProductionSuccess(BuildContext context, String message) {
@@ -169,7 +88,10 @@ class _ProductionScreenState extends State<ProductionScreen> {
   late Future<List<Map<String, dynamic>>> _future;
   String _search = '';
   String _status = 'all';
+  String? _customerFilter;
+  String? _productFilter;
   String? _selectedId;
+  bool _kanban = false;
 
   ProductionRepository get repository => _repository;
 
@@ -203,7 +125,7 @@ class _ProductionScreenState extends State<ProductionScreen> {
   }
 
   Future<void> _create() async {
-    final result = await showDialog<_CreateProductionRequest>(
+    final result = await showPomgtDialog<_CreateProductionRequest>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const _CreateProductionOrderDialog(),
@@ -240,8 +162,78 @@ class _ProductionScreenState extends State<ProductionScreen> {
     }
   }
 
+  Future<void> _createMultiple() async {
+    final result = await showPomgtDialog<_CreateMultiProductionRequest>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _CreateMultiProductionOrderDialog(),
+    );
+    if (result == null || !mounted) return;
+    final outcomes = <_MultiCreateOutcome>[];
+    String? lastCreatedId;
+    for (final item in result.items) {
+      try {
+        var row = await repository.createManual(
+          productId: item.productId,
+          quantity: item.quantity,
+          uomId: item.uomId,
+          requiredAt: result.requiredAt,
+          priority: result.priority,
+          plannedStartAt: result.plannedStartAt,
+          plannedEndAt: result.plannedEndAt,
+          notes: result.notes,
+          sourceType: result.sourceType,
+        );
+        lastCreatedId = row['id']?.toString();
+        if (result.prepareAutomatically) {
+          try {
+            row = await repository.prepare(row['id'].toString());
+            outcomes.add(
+              _MultiCreateOutcome(
+                item.label,
+                _MultiCreateStatus.prepared,
+                opNumber: row['op_number']?.toString(),
+              ),
+            );
+          } catch (e) {
+            outcomes.add(
+              _MultiCreateOutcome(
+                item.label,
+                _MultiCreateStatus.createdNotPrepared,
+                opNumber: row['op_number']?.toString(),
+                error: ErrorCopy.message(e),
+              ),
+            );
+          }
+        } else {
+          outcomes.add(
+            _MultiCreateOutcome(
+              item.label,
+              _MultiCreateStatus.createdDraft,
+              opNumber: row['op_number']?.toString(),
+            ),
+          );
+        }
+      } catch (e) {
+        outcomes.add(
+          _MultiCreateOutcome(
+            item.label,
+            _MultiCreateStatus.failed,
+            error: ErrorCopy.message(e),
+          ),
+        );
+      }
+    }
+    if (!mounted) return;
+    _reload(select: lastCreatedId);
+    await showPomgtDialog<void>(
+      context: context,
+      builder: (_) => _MultiCreateResultsDialog(outcomes: outcomes),
+    );
+  }
+
   Future<void> _edit(Map<String, dynamic> row) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EntityFormDialog(
@@ -263,12 +255,19 @@ class _ProductionScreenState extends State<ProductionScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> row) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Eliminar orden de producción'),
-        content: const Text(
-          'Esta acción no se puede deshacer. Los registros relacionados pueden impedir la eliminación para proteger la trazabilidad.',
+        title: pomgtDialogTitle(
+          context,
+          'Eliminar orden de producción',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text(
+            'Se eliminará la orden con sus operaciones, materiales, eventos y asignación al pedido. Esta acción no se puede deshacer.',
+          ),
         ),
         actions: [
           TextButton(
@@ -284,13 +283,11 @@ class _ProductionScreenState extends State<ProductionScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      await context.read<GenericRepository>().deleteRow(
-        Phase1Schema.tables['production_orders']!,
-        row,
-      );
+      await repository.deleteOrder(row['id'].toString());
       if (!mounted) return;
       _selectedId = null;
       _reload();
+      _showProductionSuccess(context, 'Orden de producción eliminada.');
     } catch (error) {
       if (!mounted) return;
       _showProductionError(context, error);
@@ -319,8 +316,47 @@ class _ProductionScreenState extends State<ProductionScreen> {
             );
           }
           final all = snapshot.data ?? const <Map<String, dynamic>>[];
+          final customerItems = <PickerItem>[];
+          final seenCustomers = <String>{};
+          for (final row in all) {
+            final id = row['customer_id']?.toString();
+            final name = row['customer_name']?.toString();
+            if (id == null || name == null || name.isEmpty) continue;
+            if (!seenCustomers.add(id)) continue;
+            customerItems.add(
+              PickerItem(id: id, label: name, category: 'Clientes'),
+            );
+          }
+          customerItems.sort((a, b) => a.label.compareTo(b.label));
+          final productItems = <PickerItem>[];
+          final seenProducts = <String>{};
+          for (final row in all) {
+            final id = row['product_id']?.toString();
+            if (id == null || !seenProducts.add(id)) continue;
+            final sku = row['product_sku']?.toString();
+            final name = row['product_name']?.toString();
+            productItems.add(
+              PickerItem(
+                id: id,
+                label: '${sku ?? '—'} · ${name ?? 'Producto'}',
+                category: 'Productos',
+              ),
+            );
+          }
+          productItems.sort((a, b) => a.label.compareTo(b.label));
+          final scoped = all.where((row) {
+            if (_customerFilter != null &&
+                row['customer_id']?.toString() != _customerFilter) {
+              return false;
+            }
+            if (_productFilter != null &&
+                row['product_id']?.toString() != _productFilter) {
+              return false;
+            }
+            return true;
+          }).toList();
           final query = _search.trim().toLowerCase();
-          final rows = all.where((row) {
+          final rows = scoped.where((row) {
             if (_status != 'all' && row['status']?.toString() != _status) {
               return false;
             }
@@ -352,94 +388,127 @@ class _ProductionScreenState extends State<ProductionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _ProductionTitle(onCreate: _create),
+                _ProductionTitle(
+                  onCreate: _create,
+                  onCreateMultiple: _createMultiple,
+                  kanban: _kanban,
+                  onViewChanged: (value) => setState(() => _kanban = value),
+                ),
+                const SizedBox(height: 14),
+                _ProductionFilters(
+                  customerItems: customerItems,
+                  productItems: productItems,
+                  customerId: _customerFilter,
+                  productId: _productFilter,
+                  onCustomerChanged: (value) =>
+                      setState(() => _customerFilter = value),
+                  onProductChanged: (value) =>
+                      setState(() => _productFilter = value),
+                ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 1050;
-                      if (compact) {
-                        return Column(
-                          children: [
-                            SizedBox(
-                              height: 300,
-                              child: _ProductionMasterList(
-                                rows: rows,
-                                loading:
-                                    snapshot.connectionState ==
-                                    ConnectionState.waiting,
-                                selectedId: _selectedId,
-                                search: _search,
-                                status: _status,
-                                onSearch: (value) =>
-                                    setState(() => _search = value),
-                                onStatus: (value) =>
-                                    setState(() => _status = value),
-                                onSelect: (id) =>
-                                    setState(() => _selectedId = id),
-                                onEdit: _edit,
-                                onDelete: _delete,
-                                onRefresh: _reload,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Expanded(
-                              child: selected == null
-                                  ? const _ProductionEmptyDetail()
-                                  : _ProductionDetail(
-                                      key: ValueKey(
-                                        '${selected['id']}-${context.watch<ProductionController>().revision}',
-                                      ),
-                                      orderId: selected['id'].toString(),
-                                      onChanged: () => _reload(
-                                        select: selected['id'].toString(),
-                                      ),
-                                    ),
-                            ),
-                          ],
-                        );
-                      }
-                      return Row(
-                        children: [
-                          SizedBox(
-                            width: constraints.maxWidth >= 1450 ? 360 : 320,
-                            child: _ProductionMasterList(
-                              rows: rows,
-                              loading:
-                                  snapshot.connectionState ==
-                                  ConnectionState.waiting,
-                              selectedId: _selectedId,
-                              search: _search,
-                              status: _status,
-                              onSearch: (value) =>
-                                  setState(() => _search = value),
-                              onStatus: (value) =>
-                                  setState(() => _status = value),
-                              onSelect: (id) =>
-                                  setState(() => _selectedId = id),
-                              onEdit: _edit,
-                              onDelete: _delete,
-                              onRefresh: _reload,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: selected == null
-                                ? const _ProductionEmptyDetail()
-                                : _ProductionDetail(
-                                    key: ValueKey(
-                                      '${selected['id']}-${context.watch<ProductionController>().revision}',
-                                    ),
-                                    orderId: selected['id'].toString(),
-                                    onChanged: () => _reload(
-                                      select: selected['id'].toString(),
+                  child: _kanban
+                      ? ProductionKanbanBoard(
+                          orders: scoped,
+                          search: _search,
+                          onSearch: (value) => setState(() => _search = value),
+                          onOpen: (id) => setState(() {
+                            _kanban = false;
+                            _selectedId = id;
+                          }),
+                          onTransition: (id, status) async {
+                            await repository.transitionOrder(id, status);
+                            if (mounted) _reload();
+                          },
+                          onError: (e) => _showProductionError(context, e),
+                        )
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            final compact = constraints.maxWidth < 1050;
+                            if (compact) {
+                              return Column(
+                                children: [
+                                  SizedBox(
+                                    height: 300,
+                                    child: _ProductionMasterList(
+                                      rows: rows,
+                                      loading:
+                                          snapshot.connectionState ==
+                                          ConnectionState.waiting,
+                                      selectedId: _selectedId,
+                                      search: _search,
+                                      status: _status,
+                                      onSearch: (value) =>
+                                          setState(() => _search = value),
+                                      onStatus: (value) =>
+                                          setState(() => _status = value),
+                                      onSelect: (id) =>
+                                          setState(() => _selectedId = id),
+                                      onEdit: _edit,
+                                      onDelete: _delete,
+                                      onRefresh: _reload,
                                     ),
                                   ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+                                  const SizedBox(height: 14),
+                                  Expanded(
+                                    child: selected == null
+                                        ? const _ProductionEmptyDetail()
+                                        : _ProductionDetail(
+                                            key: ValueKey(selected['id']),
+                                            orderId: selected['id'].toString(),
+                                            onChanged: () => _reload(
+                                              select: selected['id'].toString(),
+                                            ),
+                                            onEdit: (order) => _edit(order),
+                                            onDelete: (order) => _delete(order),
+                                          ),
+                                  ),
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                SizedBox(
+                                  width: constraints.maxWidth >= 1450
+                                      ? 360
+                                      : 320,
+                                  child: _ProductionMasterList(
+                                    rows: rows,
+                                    loading:
+                                        snapshot.connectionState ==
+                                        ConnectionState.waiting,
+                                    selectedId: _selectedId,
+                                    search: _search,
+                                    status: _status,
+                                    onSearch: (value) =>
+                                        setState(() => _search = value),
+                                    onStatus: (value) =>
+                                        setState(() => _status = value),
+                                    onSelect: (id) =>
+                                        setState(() => _selectedId = id),
+                                    onEdit: _edit,
+                                    onDelete: _delete,
+                                    onRefresh: _reload,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: selected == null
+                                      ? const _ProductionEmptyDetail()
+                                      : _ProductionDetail(
+                                          key: ValueKey(selected['id']),
+                                          orderId: selected['id'].toString(),
+                                          onChanged: () => _reload(
+                                            select: selected['id'].toString(),
+                                          ),
+                                          onEdit: (order) => _edit(order),
+                                          onDelete: (order) => _delete(order),
+                                        ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                 ),
               ],
             ),
@@ -451,54 +520,821 @@ class _ProductionScreenState extends State<ProductionScreen> {
 }
 
 class _ProductionTitle extends StatelessWidget {
-  const _ProductionTitle({required this.onCreate});
+  const _ProductionTitle({
+    required this.onCreate,
+    required this.onCreateMultiple,
+    required this.kanban,
+    required this.onViewChanged,
+  });
   final VoidCallback onCreate;
+  final VoidCallback onCreateMultiple;
+  final bool kanban;
+  final ValueChanged<bool> onViewChanged;
 
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final titleBlock = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: const [
+              SectionTitle('Producción', icon: LucideIcons.settings),
+              SizedBox(width: 8),
+              InfoTip(
+                'Centro operativo de las órdenes de producción. Conecta pedido, producto, estructura de fabricación, ruta, ejecución, calidad, costos, documentos y trazabilidad.',
+                size: 16,
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Planifica, prepara, ejecuta y cierra cada orden con trazabilidad completa.',
+            style: TextStyle(
+              color: PomgtColors.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      );
+      final actions = Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _ViewToggle(kanban: kanban, onChanged: onViewChanged),
+          OutlinedButton.icon(
+            onPressed: onCreateMultiple,
+            icon: const Icon(LucideIcons.layers, size: 18),
+            label: const Text('Nueva OP múltiple'),
+          ),
+          FilledButton.icon(
+            onPressed: onCreate,
+            icon: const Icon(LucideIcons.plus, size: 18),
+            label: const Text('Nueva Orden de Producción'),
+          ),
+        ],
+      );
+      if (constraints.maxWidth < 760) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [titleBlock, const SizedBox(height: 14), actions],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: 14),
+          actions,
+        ],
+      );
+    },
+  );
+}
+
+class _ProductionFilters extends StatelessWidget {
+  const _ProductionFilters({
+    required this.customerItems,
+    required this.productItems,
+    required this.customerId,
+    required this.productId,
+    required this.onCustomerChanged,
+    required this.onProductChanged,
+  });
+
+  final List<PickerItem> customerItems;
+  final List<PickerItem> productItems;
+  final String? customerId;
+  final String? productId;
+  final ValueChanged<String?> onCustomerChanged;
+  final ValueChanged<String?> onProductChanged;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final wide = constraints.maxWidth >= 620;
+      final customer = CategorizedSearchPicker(
+        label: 'Cliente',
+        hint: 'Buscar cliente…',
+        value: customerId,
+        items: customerItems,
+        emptyMessage: 'Sin clientes en estas órdenes',
+        onChanged: onCustomerChanged,
+      );
+      final product = CategorizedSearchPicker(
+        label: 'Producto',
+        hint: 'Buscar producto…',
+        value: productId,
+        items: productItems,
+        emptyMessage: 'Sin productos en estas órdenes',
+        onChanged: onProductChanged,
+      );
+      final hasFilters = customerId != null || productId != null;
+      final clear = TextButton.icon(
+        onPressed: hasFilters
+            ? () {
+                onCustomerChanged(null);
+                onProductChanged(null);
+              }
+            : null,
+        icon: const Icon(LucideIcons.x, size: 16),
+        label: const Text('Limpiar filtros'),
+      );
+      if (!wide) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            customer,
+            const SizedBox(height: 10),
+            product,
+            if (hasFilters) ...[
+              const SizedBox(height: 4),
+              Align(alignment: Alignment.centerRight, child: clear),
+            ],
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: customer),
+          const SizedBox(width: 12),
+          Expanded(child: product),
+          const SizedBox(width: 8),
+          clear,
+        ],
+      );
+    },
+  );
+}
+
+class _ViewToggle extends StatelessWidget {
+  const _ViewToggle({required this.kanban, required this.onChanged});
+  final bool kanban;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(3),
+    decoration: BoxDecoration(
+      color: PomgtColors.surfaceAlt,
+      borderRadius: PomgtRadii.borderPill,
+      border: Border.all(color: PomgtColors.line),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ViewToggleButton(
+          label: 'Lista',
+          icon: LucideIcons.list,
+          selected: !kanban,
+          onTap: () => onChanged(false),
+        ),
+        _ViewToggleButton(
+          label: 'Kanban',
+          icon: LucideIcons.layoutGrid,
+          selected: kanban,
+          onTap: () => onChanged(true),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ViewToggleButton extends StatelessWidget {
+  const _ViewToggleButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: PomgtRadii.borderPill,
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: PomgtMotion.duration(context, PomgtMotion.fast),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? PomgtColors.canvas : Colors.transparent,
+        borderRadius: PomgtRadii.borderPill,
+        boxShadow: selected ? PomgtShadows.card : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 15,
+            color: selected ? PomgtColors.blue : PomgtColors.muted,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: selected ? PomgtColors.ink : PomgtColors.muted,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+const _kanbanStatuses = [
+  'draft',
+  'planned',
+  'ready',
+  'in_progress',
+  'on_hold',
+  'completed',
+  'cancelled',
+];
+
+Color _kanbanColumnColor(String status) => switch (status) {
+  'draft' => PomgtColors.slate,
+  'planned' => PomgtColors.violet,
+  'ready' => PomgtColors.cyan,
+  'in_progress' => PomgtColors.blue,
+  'on_hold' => PomgtColors.amber,
+  'completed' => PomgtColors.mint,
+  'cancelled' => PomgtColors.rose,
+  _ => PomgtColors.muted,
+};
+
+class _KanbanDragData {
+  const _KanbanDragData(this.id, this.status);
+  final String id;
+  final String status;
+}
+
+/// Jira-style board for production orders: one column per OP status, cards
+/// dragged between columns transition the order via [onTransition].
+class ProductionKanbanBoard extends StatefulWidget {
+  const ProductionKanbanBoard({
+    super.key,
+    required this.orders,
+    required this.search,
+    required this.onSearch,
+    required this.onOpen,
+    required this.onTransition,
+    required this.onError,
+  });
+
+  final List<Map<String, dynamic>> orders;
+  final String search;
+  final ValueChanged<String> onSearch;
+  final ValueChanged<String> onOpen;
+  final Future<void> Function(String orderId, String newStatus) onTransition;
+  final void Function(Object error) onError;
+
+  @override
+  State<ProductionKanbanBoard> createState() => _ProductionKanbanBoardState();
+}
+
+class _ProductionKanbanBoardState extends State<ProductionKanbanBoard> {
+  final Map<String, String> _pending = {};
+  Map<String, List<String>> _operatorNames = const {};
+  String? _dragOverStatus;
+  late final TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.search);
+    _loadOperators();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadOperators() async {
+    try {
+      final generic = context.read<GenericRepository>();
+      final assignments = await generic.listRows(
+        Phase1Schema.tables['production_order_operators']!,
+      );
+      if (assignments.isEmpty || !mounted) return;
+      final members = await context.read<LookupRepository>().rows(
+        'organization_members',
+      );
+      final names = {
+        for (final m in members)
+          m['id'].toString(): m['full_name']?.toString() ?? 'Operador',
+      };
+      final grouped = <String, List<String>>{};
+      for (final row in assignments) {
+        final orderId = row['production_order_id']?.toString();
+        final name = names[row['member_id']?.toString()];
+        if (orderId == null || name == null) continue;
+        grouped.putIfAbsent(orderId, () => []).add(name);
+      }
+      if (mounted) setState(() => _operatorNames = grouped);
+    } catch (_) {
+      // Operator chips are a nice-to-have; a failed fetch shouldn't break the board.
+    }
+  }
+
+  Future<void> _handleDrop(
+    String orderId,
+    String currentStatus,
+    String newStatus,
+  ) async {
+    setState(() {
+      _pending[orderId] = newStatus;
+      _dragOverStatus = null;
+    });
+    try {
+      await widget.onTransition(orderId, newStatus);
+    } catch (e) {
+      widget.onError(e);
+    } finally {
+      if (mounted) setState(() => _pending.remove(orderId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = widget.search.trim().toLowerCase();
+    final filtered = widget.orders.where((row) {
+      if (query.isEmpty) return true;
+      final haystack = [
+        row['op_number'],
+        row['product_sku'],
+        row['product_name'],
+        row['customer_trade_name'],
+        row['customer_name'],
+        row['order_number'],
+      ].whereType<Object>().join(' ').toLowerCase();
+      return haystack.contains(query);
+    }).toList();
+
+    final byStatus = <String, List<Map<String, dynamic>>>{
+      for (final s in _kanbanStatuses) s: [],
+    };
+    for (final row in filtered) {
+      final id = row['id']?.toString();
+      final effective = id != null && _pending.containsKey(id)
+          ? _pending[id]!
+          : (row['status']?.toString() ?? 'draft');
+      (byStatus[effective] ??= []).add(row);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 46,
+          child: TextField(
+            controller: _searchController,
+            onChanged: widget.onSearch,
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: 'Buscar OP, producto, cliente u OC...',
+              prefixIcon: Icon(LucideIcons.search, size: 18),
+              prefixIconConstraints: BoxConstraints(minWidth: 42),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final status in _kanbanStatuses) ...[
+                  _KanbanColumn(
+                    status: status,
+                    rows: byStatus[status] ?? const [],
+                    dragOver: _dragOverStatus == status,
+                    operatorNames: _operatorNames,
+                    onWillAccept: (data) => data.status != status,
+                    onDragEnter: () => setState(() => _dragOverStatus = status),
+                    onDragLeave: () => setState(() {
+                      if (_dragOverStatus == status) _dragOverStatus = null;
+                    }),
+                    onAccept: (data) =>
+                        _handleDrop(data.id, data.status, status),
+                    onOpen: widget.onOpen,
+                  ),
+                  const SizedBox(width: 14),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _KanbanColumn extends StatelessWidget {
+  const _KanbanColumn({
+    required this.status,
+    required this.rows,
+    required this.dragOver,
+    required this.operatorNames,
+    required this.onWillAccept,
+    required this.onDragEnter,
+    required this.onDragLeave,
+    required this.onAccept,
+    required this.onOpen,
+  });
+
+  final String status;
+  final List<Map<String, dynamic>> rows;
+  final bool dragOver;
+  final Map<String, List<String>> operatorNames;
+  final bool Function(_KanbanDragData) onWillAccept;
+  final VoidCallback onDragEnter;
+  final VoidCallback onDragLeave;
+  final ValueChanged<_KanbanDragData> onAccept;
+  final ValueChanged<String> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _kanbanColumnColor(status);
+    return DragTarget<_KanbanDragData>(
+      onWillAcceptWithDetails: (details) => onWillAccept(details.data),
+      onMove: (_) => onDragEnter(),
+      onLeave: (_) => onDragLeave(),
+      onAcceptWithDetails: (details) => onAccept(details.data),
+      builder: (context, candidates, rejected) {
+        return Container(
+          width: 300,
+          decoration: BoxDecoration(
+            color: dragOver
+                ? color.withValues(alpha: .07)
+                : PomgtColors.surface,
+            borderRadius: PomgtRadii.borderMd,
+            border: Border.all(
+              color: dragOver ? color.withValues(alpha: .55) : PomgtColors.line,
+              width: dragOver ? 1.4 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 10, 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        UiCopy.enumLabel(status).toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                          letterSpacing: .3,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: .12),
+                        borderRadius: PomgtRadii.borderPill,
+                      ),
+                      child: Text(
+                        '${rows.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: rows.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Text(
+                          'Sin órdenes',
+                          style: TextStyle(
+                            color: PomgtColors.muted.withValues(alpha: .8),
+                            fontSize: 12,
+                          ),
+                        ),
+                      )
+                    : ScrollToTopArea(
+                        padding: const EdgeInsets.all(10),
+                        builder: (context, controller) => PomgtListView.builder(
+                          controller: controller,
+                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+                          itemCount: rows.length,
+                          itemBuilder: (context, index) {
+                            final row = rows[index];
+                            final id = row['id'].toString();
+                            final card = _KanbanCard(
+                              row: row,
+                              color: color,
+                              operators: operatorNames[id] ?? const [],
+                              onTap: () => onOpen(id),
+                            );
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Draggable<_KanbanDragData>(
+                                data: _KanbanDragData(id, status),
+                                feedback: Material(
+                                  color: Colors.transparent,
+                                  child: SizedBox(width: 276, child: card),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: .35,
+                                  child: card,
+                                ),
+                                child: card,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _KanbanCard extends StatelessWidget {
+  const _KanbanCard({
+    required this.row,
+    required this.color,
+    required this.operators,
+    required this.onTap,
+  });
+  final Map<String, dynamic> row;
+  final Color color;
+  final List<String> operators;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final priority = row['priority']?.toString() ?? 'normal';
+    final progress = _n(row['progress_pct']) / 100;
+    final customer = row['customer_trade_name'] ?? row['customer_name'];
+    return InkWell(
+      borderRadius: PomgtRadii.borderMd,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: PomgtColors.canvas,
+          borderRadius: PomgtRadii.borderMd,
+          border: Border.all(
+            color: PomgtColors.lineStrong.withValues(alpha: .55),
+          ),
+          boxShadow: PomgtShadows.card,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              children: const [
-                Text(
-                  'Producción',
-                  style: TextStyle(
-                    color: PomgtColors.ink,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -.8,
+              children: [
+                Expanded(
+                  child: Text(
+                    row['op_number']?.toString() ?? 'OP',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: PomgtColors.ink,
+                    ),
                   ),
                 ),
-                SizedBox(width: 8),
-                InfoTip(
-                  'Centro operativo de las órdenes de producción. Conecta pedido, producto, lista de materiales, ruta, ejecución, calidad, costos, documentos y trazabilidad.',
-                  size: 16,
+                _PriorityFlag(priority: priority),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${row['product_sku'] ?? '—'} · ${row['product_name'] ?? 'Producto'}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: PomgtColors.secondaryInk,
+                height: 1.3,
+              ),
+            ),
+            if (row['batch_number'] != null) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(
+                    LucideIcons.layers,
+                    size: 11,
+                    color: PomgtColors.blue,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Lote ${row['batch_number']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: PomgtColors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (customer != null) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(
+                    LucideIcons.building2,
+                    size: 11,
+                    color: PomgtColors.muted,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      customer.toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: PomgtColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 9),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: PomgtProgressIndicator(
+                value: progress.clamp(0, 1).toDouble(),
+                minHeight: 4,
+                backgroundColor: PomgtColors.line,
+                valueColor: AlwaysStoppedAnimation(color),
+              ),
+            ),
+            const SizedBox(height: 9),
+            Row(
+              children: [
+                const Icon(
+                  LucideIcons.calendar,
+                  size: 12,
+                  color: PomgtColors.muted,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    row['required_at'] == null
+                        ? 'Sin fecha requerida'
+                        : _date(row['required_at']),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: PomgtColors.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${_fmt(row['planned_quantity'])} ${row['uom_symbol'] ?? ''}',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    color: PomgtColors.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 5),
-            const Text(
-              'Planifica, prepara, ejecuta y cierra cada orden con trazabilidad completa.',
-              style: TextStyle(
-                color: PomgtColors.muted,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            if (operators.isNotEmpty) ...[
+              const SizedBox(height: 9),
+              _OperatorAvatars(names: operators),
+            ],
           ],
         ),
       ),
-      FilledButton.icon(
-        onPressed: onCreate,
-        icon: const Icon(CupertinoIcons.add, size: 18),
-        label: const Text('Nueva Orden de Producción'),
-      ),
-    ],
-  );
+    );
+  }
+}
+
+class _PriorityFlag extends StatelessWidget {
+  const _PriorityFlag({required this.priority});
+  final String priority;
+
+  Color get _color => switch (priority) {
+    'urgent' => PomgtColors.rose,
+    'high' => PomgtColors.amber,
+    'low' => PomgtColors.muted,
+    _ => PomgtColors.blue,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    if (priority.isEmpty || priority == 'normal') {
+      return const SizedBox.shrink();
+    }
+    return Tooltip(
+      message: UiCopy.enumLabel(priority),
+      child: Icon(LucideIcons.flag, size: 13, color: _color),
+    );
+  }
+}
+
+class _OperatorAvatars extends StatelessWidget {
+  const _OperatorAvatars({required this.names});
+  final List<String> names;
+
+  static String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts[0].substring(0, 1).toUpperCase();
+    return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = names.take(3).toList();
+    final extra = names.length - shown.length;
+    return Row(
+      children: [
+        for (final name in shown) ...[
+          Tooltip(
+            message: name,
+            child: Container(
+              width: 20,
+              height: 20,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: PomgtColors.blueSoft,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                _initials(name),
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: PomgtColors.blue,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+        if (extra > 0)
+          Text(
+            '+$extra',
+            style: const TextStyle(
+              fontSize: 10.5,
+              color: PomgtColors.muted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _ProductionMasterList extends StatelessWidget {
@@ -534,7 +1370,9 @@ class _ProductionMasterList extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.surface,
         borderRadius: PomgtRadii.borderMd,
-        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
         boxShadow: PomgtShadows.card,
       ),
       child: Column(
@@ -547,7 +1385,7 @@ class _ProductionMasterList extends StatelessWidget {
                 onChanged: onSearch,
                 decoration: InputDecoration(
                   hintText: 'Buscar OP, producto, cliente u OC...',
-                  prefixIcon: const Icon(CupertinoIcons.search, size: 20),
+                  prefixIcon: const Icon(LucideIcons.search, size: 20),
                   prefixIconConstraints: const BoxConstraints(minWidth: 46),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 18,
@@ -556,7 +1394,7 @@ class _ProductionMasterList extends StatelessWidget {
                   suffixIcon: IconButton(
                     tooltip: 'Actualizar',
                     onPressed: onRefresh,
-                    icon: const Icon(CupertinoIcons.refresh, size: 17),
+                    icon: const Icon(LucideIcons.refreshCw, size: 17),
                   ),
                 ),
               ),
@@ -565,6 +1403,7 @@ class _ProductionMasterList extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
             child: DropdownButtonFormField<String>(
+              errorBuilder: pomgtValidationMessage,
               initialValue: status,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Estado'),
@@ -598,13 +1437,13 @@ class _ProductionMasterList extends StatelessWidget {
               style: const TextStyle(
                 color: PomgtColors.muted,
                 fontSize: 11.5,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
           Expanded(
             child: loading && rows.isEmpty
-                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                ? const PomgtLoading()
                 : rows.isEmpty
                 ? const Center(
                     child: Padding(
@@ -616,161 +1455,169 @@ class _ProductionMasterList extends StatelessWidget {
                       ),
                     ),
                   )
-                : ListView.builder(
-                    itemCount: rows.length,
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
-                      final id = row['id'].toString();
-                      final selected = id == selectedId;
-                      final progress = _n(row['progress_pct']);
-                      return InkWell(
-                        borderRadius: PomgtRadii.borderSm,
-                        onTap: () => onSelect(id),
-                        child: Container(
-                          margin: const EdgeInsets.fromLTRB(10, 4, 10, 4),
-                          padding: const EdgeInsets.fromLTRB(14, 13, 14, 12),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? PomgtColors.navySelected
-                                : PomgtColors.canvas,
-                            borderRadius: PomgtRadii.borderSm,
-                            border: Border.all(
+                : ScrollToTopArea(
+                    padding: const EdgeInsets.all(10),
+                    builder: (context, controller) => PomgtListView.builder(
+                      controller: controller,
+                      itemCount: rows.length,
+                      itemBuilder: (context, index) {
+                        final row = rows[index];
+                        final id = row['id'].toString();
+                        final selected = id == selectedId;
+                        final progress = _n(row['progress_pct']);
+                        return InkWell(
+                          borderRadius: PomgtRadii.borderSm,
+                          onTap: () => onSelect(id),
+                          child: Container(
+                            margin: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+                            padding: const EdgeInsets.fromLTRB(14, 13, 14, 12),
+                            decoration: BoxDecoration(
                               color: selected
-                                  ? PomgtColors.navySelectedBorder
-                                  : PomgtColors.line,
+                                  ? PomgtColors.navySelected
+                                  : PomgtColors.canvas,
+                              borderRadius: PomgtRadii.borderSm,
+                              border: Border.all(
+                                color: selected
+                                    ? PomgtColors.navySelectedBorder
+                                    : PomgtColors.line,
+                              ),
                             ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 30,
-                                    height: 30,
-                                    child: Icon(
-                                      CupertinoIcons.gear_alt,
-                                      size: 17,
-                                      color: PomgtColors.ink,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      row['op_number']?.toString() ?? 'OP',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 30,
+                                      height: 30,
+                                      child: Icon(
+                                        LucideIcons.settings,
+                                        size: 17,
                                         color: PomgtColors.ink,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w900,
                                       ),
                                     ),
-                                  ),
-                                  PopupMenuButton<String>(
-                                    tooltip: 'Acciones',
-                                    padding: EdgeInsets.zero,
-                                    onSelected: (value) {
-                                      if (value == 'edit') onEdit(row);
-                                      if (value == 'delete') onDelete(row);
-                                    },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'edit',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              CupertinoIcons.pencil,
-                                              size: 17,
-                                            ),
-                                            SizedBox(width: 9),
-                                            Text('Editar'),
-                                          ],
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        row['op_number']?.toString() ?? 'OP',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: PomgtColors.ink,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
-                                      PopupMenuItem(
-                                        value: 'delete',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              CupertinoIcons.trash,
-                                              size: 17,
-                                              color: PomgtColors.danger,
-                                            ),
-                                            SizedBox(width: 9),
-                                            Text(
-                                              'Eliminar',
-                                              style: TextStyle(
+                                    ),
+                                    PopupMenuButton<String>(
+                                      popUpAnimationStyle: PomgtMotion.style(
+                                        context,
+                                      ),
+                                      tooltip: 'Acciones',
+                                      padding: EdgeInsets.zero,
+                                      onSelected: (value) {
+                                        if (value == 'edit') onEdit(row);
+                                        if (value == 'delete') onDelete(row);
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(
+                                          value: 'edit',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                LucideIcons.pencil,
+                                                size: 17,
+                                              ),
+                                              SizedBox(width: 9),
+                                              Text('Editar'),
+                                            ],
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                LucideIcons.trash2,
+                                                size: 17,
                                                 color: PomgtColors.danger,
                                               ),
-                                            ),
-                                          ],
+                                              SizedBox(width: 9),
+                                              Text(
+                                                'Eliminar',
+                                                style: TextStyle(
+                                                  color: PomgtColors.danger,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: Icon(
+                                          LucideIcons.ellipsisVertical,
+                                          size: 17,
+                                          color: PomgtColors.muted,
                                         ),
                                       ),
-                                    ],
-                                    child: const Padding(
-                                      padding: EdgeInsets.all(8),
-                                      child: Icon(
-                                        CupertinoIcons.ellipsis_vertical,
-                                        size: 17,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${row['product_sku'] ?? '—'} · ${row['product_name'] ?? 'Producto'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: PomgtColors.secondaryInk,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  row['customer_name']?.toString() ??
+                                      _sourceLabel(row['source_type']),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: PomgtColors.muted,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 9),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: PomgtProgressIndicator(
+                                        value: (progress / 100).clamp(0, 1),
+                                        minHeight: 3,
+                                        backgroundColor: PomgtColors.line,
+                                        valueColor:
+                                            const AlwaysStoppedAnimation(
+                                              PomgtColors.blue,
+                                            ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '${progress.toStringAsFixed(0)}%',
+                                      style: const TextStyle(
                                         color: PomgtColors.muted,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${row['product_sku'] ?? '—'} · ${row['product_name'] ?? 'Producto'}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: PomgtColors.secondaryInk,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w800,
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                row['customer_name']?.toString() ??
-                                    _sourceLabel(row['source_type']),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: PomgtColors.muted,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 9),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: LinearProgressIndicator(
-                                      value: (progress / 100).clamp(0, 1),
-                                      minHeight: 3,
-                                      backgroundColor: PomgtColors.line,
-                                      valueColor: const AlwaysStoppedAnimation(
-                                        PomgtColors.blue,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    '${progress.toStringAsFixed(0)}%',
-                                    style: const TextStyle(
-                                      color: PomgtColors.muted,
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -785,29 +1632,12 @@ class _ProductionEmptyDetail extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(
       color: PomgtColors.surface,
-      border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
+      border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .55)),
     ),
-    child: const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.precision_manufacturing_outlined,
-            size: 28,
-            color: PomgtColors.muted,
-          ),
-          SizedBox(height: 12),
-          Text(
-            'Selecciona una orden de producción',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
-          SizedBox(height: 5),
-          Text(
-            'El expediente operativo completo aparecerá aquí.',
-            style: TextStyle(color: PomgtColors.muted),
-          ),
-        ],
-      ),
+    child: const EmptyState(
+      icon: LucideIcons.factory,
+      title: 'Selecciona una orden de producción',
+      message: 'El expediente operativo completo aparecerá aquí.',
     ),
   );
 }
@@ -817,9 +1647,13 @@ class _ProductionDetail extends StatefulWidget {
     super.key,
     required this.orderId,
     required this.onChanged,
+    required this.onEdit,
+    required this.onDelete,
   });
   final String orderId;
   final VoidCallback onChanged;
+  final void Function(Map<String, dynamic> order) onEdit;
+  final void Function(Map<String, dynamic> order) onDelete;
 
   @override
   State<_ProductionDetail> createState() => _ProductionDetailState();
@@ -829,6 +1663,8 @@ class _ProductionDetailState extends State<_ProductionDetail> {
   late Future<Map<String, dynamic>> _future;
   int _tab = 0;
   bool _busy = false;
+  bool _startingProduction = false;
+  late int _seenRevision;
 
   ProductionRepository get repository => context.read<ProductionRepository>();
   ProductionOrderPdfService get pdf =>
@@ -873,14 +1709,39 @@ class _ProductionDetailState extends State<_ProductionDetail> {
   void initState() {
     super.initState();
     _future = repository.detail(widget.orderId);
+    _seenRevision = context.read<ProductionController>().revision;
+  }
+
+  // The panel used to be keyed by '$orderId-$revision', so every change -
+  // including the ones this very panel triggers (complete/pause/start an
+  // operation) - destroyed and recreated it, resetting `_tab` back to
+  // Resumen. It's now keyed by orderId alone and stays mounted; this watches
+  // the controller only to pick up changes made elsewhere (e.g. editing the
+  // order via its dialog), refreshing `_future` in place without touching
+  // `_tab`. `_reload()` already updates `_seenRevision` itself so this
+  // doesn't re-fetch a second time for changes this panel caused.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final revision = context.watch<ProductionController>().revision;
+    if (revision == _seenRevision) return;
+    _seenRevision = revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _future = repository.detail(widget.orderId);
+        });
+      }
+    });
   }
 
   void _reload() {
     if (!mounted) return;
+    widget.onChanged();
+    _seenRevision = context.read<ProductionController>().revision;
     setState(() {
       _future = repository.detail(widget.orderId);
     });
-    widget.onChanged();
   }
 
   Future<void> _action(Future<dynamic> Function() work, String success) async {
@@ -902,11 +1763,138 @@ class _ProductionDetailState extends State<_ProductionDetail> {
     });
   }
 
+  /// Checks the order's product for an active BOM and an active routing
+  /// before "Preparar OP"/"Display operador" proceed, opening the matching
+  /// link dialog directly instead of letting the action fail with a raw
+  /// Postgres error. Loops so one press can fix both gaps in sequence.
+  Future<bool> _ensureBomAndRoutingReady(Map<String, dynamic> product) async {
+    final productId = product['id']?.toString();
+    if (productId == null) return true;
+    final lookups = context.read<LookupRepository>();
+    while (mounted) {
+      final rows = await Future.wait([
+        lookups.rows('boms'),
+        lookups.rows('bom_revisions'),
+        lookups.rows('routings'),
+        lookups.rows('routing_revisions'),
+      ]);
+      final missingBom = productIdsMissingActiveBom(
+        [productId],
+        boms: rows[0],
+        bomRevisions: rows[1],
+      ).isNotEmpty;
+      if (missingBom) {
+        if (!mounted) return false;
+        final created = await showPomgtDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) =>
+              LinkBomDialog(product: product, activateRevision: true),
+        );
+        if (created != true) return false;
+        lookups.invalidate('boms');
+        lookups.invalidate('bom_revisions');
+        continue;
+      }
+      final missingRouting = productIdsMissingActiveRouting(
+        [productId],
+        products: [product],
+        routings: rows[2],
+        routingRevisions: rows[3],
+      ).isNotEmpty;
+      if (missingRouting) {
+        if (!mounted) return false;
+        final created = await showPomgtDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => LinkRoutingDialog(product: product),
+        );
+        if (created != true) return false;
+        lookups.invalidate('routings');
+        lookups.invalidate('routing_revisions');
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _prepareOrder(Map<String, dynamic> product) async {
+    final ready = await _ensureBomAndRoutingReady(product);
+    if (!ready) {
+      if (mounted) _reload();
+      return;
+    }
+    await _action(
+      () => repository.prepare(widget.orderId),
+      'Orden preparada correctamente.',
+    );
+  }
+
+  Future<void> _startProduction() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _startingProduction = true;
+    });
+    try {
+      await repository.transitionOrder(widget.orderId, 'in_progress');
+      if (!mounted) return;
+      final data = await repository.detail(widget.orderId);
+      if (!mounted) return;
+      setState(() {
+        _future = Future.value(data);
+      });
+      widget.onChanged();
+      _seenRevision = context.read<ProductionController>().revision;
+      _showProductionSuccess(context, 'Producción iniciada.');
+    } catch (e) {
+      if (mounted) _showProductionError(context, e);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _startingProduction = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openOperatorDisplay(Map<String, dynamic> product) async {
+    final ready = await _ensureBomAndRoutingReady(product);
+    if (!ready) {
+      if (mounted) _reload();
+      return;
+    }
+    if (!mounted) return;
+    final productionRepository = repository;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => ProductionOperatorDisplay(
+          orderId: widget.orderId,
+          repository: productionRepository,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // _reload() already refreshes this panel and calls widget.onChanged(),
+    // which is what tells the master list the operator display may have
+    // transitioned the order's status (e.g. starting production on its
+    // first step) without going through this screen's own _startProduction.
+    _reload();
+  }
+
   Future<void> _previewPdf() async {
     try {
       final data = await repository.detail(widget.orderId);
       final order = _map(data['order']);
-      final generatedBytes = await pdf.buildFromData(data);
+      if (!mounted) return;
+      final generatedBytes = await runWithPomgtLoadingDialog(
+        context,
+        'Generando PDF…',
+        () => pdf.buildFromData(data),
+      );
       if (generatedBytes.isEmpty) {
         throw StateError('El PDF se generó vacío. Intenta nuevamente.');
       }
@@ -915,7 +1903,7 @@ class _ProductionDetailState extends State<_ProductionDetail> {
       final filename =
           '${number == null || number.isEmpty ? 'OP' : number}.pdf';
       if (!mounted) return;
-      await showDialog<void>(
+      await showPomgtDialog<void>(
         context: context,
         builder: (dialogContext) => Dialog(
           insetPadding: EdgeInsets.all(
@@ -928,52 +1916,73 @@ class _ProductionDetailState extends State<_ProductionDetail> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 12, 8, 8),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        CupertinoIcons.doc_text,
-                        color: PomgtColors.blue,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 9),
-                      const Expanded(
-                        child: Text(
-                          'Vista previa de la orden de producción',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 16,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final narrow = constraints.maxWidth < 460;
+                      Future<void> printAction() async {
+                        await Printing.layoutPdf(
+                          name: filename,
+                          onLayout: (_) async =>
+                              Uint8List.fromList(sourceBytes),
+                        );
+                      }
+
+                      Future<void> downloadAction() async {
+                        await downloadPdfFile(
+                          bytes: Uint8List.fromList(sourceBytes),
+                          filename: filename,
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          const Icon(
+                            LucideIcons.fileText,
+                            color: PomgtColors.ink,
+                            size: 20,
                           ),
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await Printing.layoutPdf(
-                            name: filename,
-                            onLayout: (_) async =>
-                                Uint8List.fromList(sourceBytes),
-                          );
-                        },
-                        icon: const Icon(CupertinoIcons.printer, size: 16),
-                        label: const Text('Imprimir'),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await downloadPdfFile(
-                            bytes: Uint8List.fromList(sourceBytes),
-                            filename: filename,
-                          );
-                        },
-                        icon: const Icon(
-                          CupertinoIcons.arrow_down_doc,
-                          size: 16,
-                        ),
-                        label: const Text('Descargar'),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(CupertinoIcons.xmark),
-                      ),
-                    ],
+                          const SizedBox(width: 9),
+                          const Expanded(
+                            child: Text(
+                              'Vista previa de la orden de producción',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          if (narrow) ...[
+                            IconButton(
+                              tooltip: 'Imprimir',
+                              onPressed: printAction,
+                              icon: const Icon(LucideIcons.printer, size: 18),
+                            ),
+                            IconButton(
+                              tooltip: 'Descargar',
+                              onPressed: downloadAction,
+                              icon: const Icon(LucideIcons.fileDown, size: 18),
+                            ),
+                          ] else ...[
+                            TextButton.icon(
+                              onPressed: printAction,
+                              icon: const Icon(LucideIcons.printer, size: 16),
+                              label: const Text('Imprimir'),
+                            ),
+                            TextButton.icon(
+                              onPressed: downloadAction,
+                              icon: const Icon(LucideIcons.fileDown, size: 16),
+                              label: const Text('Descargar'),
+                            ),
+                          ],
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(LucideIcons.x),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
                 const Divider(height: 1),
@@ -998,24 +2007,53 @@ class _ProductionDetailState extends State<_ProductionDetail> {
     }
   }
 
+  Future<void> _downloadPdf() async {
+    try {
+      final data = await repository.detail(widget.orderId);
+      final order = _map(data['order']);
+      if (!mounted) return;
+      final generatedBytes = await runWithPomgtLoadingDialog(
+        context,
+        'Generando PDF…',
+        () => pdf.buildFromData(data),
+      );
+      if (generatedBytes.isEmpty) {
+        throw StateError('El PDF se generó vacío. Intenta nuevamente.');
+      }
+      final number = order['op_number']?.toString().trim();
+      final filename =
+          '${number == null || number.isEmpty ? 'OP' : number}.pdf';
+      await downloadPdfFile(
+        bytes: Uint8List.fromList(generatedBytes),
+        filename: filename,
+      );
+      if (!mounted) return;
+      _showProductionSuccess(context, 'PDF descargado.');
+    } catch (e) {
+      if (!mounted) return;
+      _showProductionError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: PomgtColors.surface,
         borderRadius: PomgtRadii.borderMd,
-        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
         boxShadow: PomgtShadows.card,
       ),
       clipBehavior: Clip.antiAlias,
       child: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
+          if (_startingProduction) return const PomgtLoading();
           if (snapshot.connectionState == ConnectionState.waiting &&
               snapshot.data == null) {
-            return const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
-            );
+            return const PomgtLoading();
           }
           if (snapshot.hasError) {
             return Center(
@@ -1030,155 +2068,148 @@ class _ProductionDetailState extends State<_ProductionDetail> {
           }
           final data = snapshot.data ?? const <String, dynamic>{};
           final order = _map(data['order']);
-          return Column(
-            children: [
-              _ProductionHero(
-                data: data,
-                onPrepare:
-                    !_busy &&
-                        (order['status'] == 'draft' ||
-                            order['status'] == 'planned')
-                    ? () => _action(
-                        () => repository.prepare(widget.orderId),
-                        'Orden preparada correctamente.',
-                      )
-                    : null,
-                onStart: !_busy && order['status'] == 'ready'
-                    ? () => _action(
-                        () => repository.transitionOrder(
-                          widget.orderId,
-                          'in_progress',
-                        ),
-                        'Producción iniciada.',
-                      )
-                    : null,
-                onPause: !_busy && order['status'] == 'in_progress'
-                    ? () => _action(
-                        () => repository.transitionOrder(
-                          widget.orderId,
-                          'on_hold',
-                        ),
-                        'Orden pausada.',
-                      )
-                    : null,
-                onResume: !_busy && order['status'] == 'on_hold'
-                    ? () => _action(
-                        () => repository.transitionOrder(
-                          widget.orderId,
-                          'in_progress',
-                        ),
-                        'Producción reanudada.',
-                      )
-                    : null,
-                onComplete: !_busy && order['status'] == 'in_progress'
-                    ? () async {
-                        if (_pendingOperations(data).isNotEmpty) {
-                          _showPendingOperationsNotice(data);
-                          return;
-                        }
-                        final qty = await _quantityDialog(
-                          context,
-                          title: 'Completar orden de producción',
-                          label: 'Cantidad completada',
-                          initial: _n(order['planned_quantity']),
-                        );
-                        if (qty == null) return;
-                        await _action(
-                          () => repository.transitionOrder(
-                            widget.orderId,
-                            'completed',
-                            completedQuantity: qty,
-                          ),
-                          'Orden de producción completada.',
-                        );
-                      }
-                    : null,
-                onCancel:
-                    !_busy &&
-                        !['completed', 'cancelled'].contains(order['status'])
-                    ? () async {
-                        final ok = await _confirm(
-                          context,
-                          'Cancelar orden de producción',
-                          'La orden quedará cancelada y conservará todo su historial. Esta acción no elimina registros.',
-                          confirm: 'Cancelar OP',
-                        );
-                        if (!ok) return;
-                        await _action(
-                          () => repository.transitionOrder(
-                            widget.orderId,
-                            'cancelled',
-                          ),
-                          'Orden cancelada.',
-                        );
-                      }
-                    : null,
-                onPlan: () async {
-                  final changed = await showDialog<bool>(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (_) => _PlanningDialog(order: order),
-                  );
-                  if (changed == true && mounted) _reload();
-                },
-                onOperatorDisplay: () async {
-                  final productionRepository = repository;
-                  await Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      fullscreenDialog: true,
-                      builder: (_) => ProductionOperatorDisplay(
-                        orderId: widget.orderId,
-                        repository: productionRepository,
-                      ),
-                    ),
-                  );
-                  if (mounted) _reload();
-                },
-                onPreviewPdf: _previewPdf,
-                onSavePdf: () => _action(
-                  () => pdf.saveAsDocument(widget.orderId),
-                  'PDF guardado en Documentos y vinculado a la OP.',
+          final product = _map(data['product']);
+          return ScrollToTopArea(
+            padding: const EdgeInsets.all(16),
+            builder: (context, controller) => CustomScrollView(
+              controller: controller,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _ProductionHero(
+                    data: data,
+                    onPrepare:
+                        !_busy &&
+                            (order['status'] == 'draft' ||
+                                order['status'] == 'planned')
+                        ? () => _prepareOrder(product)
+                        : null,
+                    onStart: !_busy && order['status'] == 'ready'
+                        ? _startProduction
+                        : null,
+                    onPause: !_busy && order['status'] == 'in_progress'
+                        ? () => _action(
+                            () => repository.transitionOrder(
+                              widget.orderId,
+                              'on_hold',
+                            ),
+                            'Orden pausada.',
+                          )
+                        : null,
+                    onResume: !_busy && order['status'] == 'on_hold'
+                        ? () => _action(
+                            () => repository.transitionOrder(
+                              widget.orderId,
+                              'in_progress',
+                            ),
+                            'Producción reanudada.',
+                          )
+                        : null,
+                    onComplete: !_busy && order['status'] == 'in_progress'
+                        ? () async {
+                            if (_pendingOperations(data).isNotEmpty) {
+                              _showPendingOperationsNotice(data);
+                              return;
+                            }
+                            final qty = await _quantityDialog(
+                              context,
+                              title: 'Completar orden de producción',
+                              label: 'Cantidad completada',
+                              initial: _n(order['planned_quantity']),
+                            );
+                            if (qty == null) return;
+                            await _action(
+                              () => repository.transitionOrder(
+                                widget.orderId,
+                                'completed',
+                                completedQuantity: qty,
+                              ),
+                              'Orden de producción completada.',
+                            );
+                          }
+                        : null,
+                    onCancel:
+                        !_busy &&
+                            ![
+                              'completed',
+                              'cancelled',
+                            ].contains(order['status'])
+                        ? () async {
+                            final ok = await _confirm(
+                              context,
+                              'Cancelar orden de producción',
+                              'La orden quedará cancelada y conservará todo su historial. Esta acción no elimina registros.',
+                              confirm: 'Cancelar OP',
+                            );
+                            if (!ok) return;
+                            await _action(
+                              () => repository.transitionOrder(
+                                widget.orderId,
+                                'cancelled',
+                              ),
+                              'Orden cancelada.',
+                            );
+                          }
+                        : null,
+                    onEdit: () => widget.onEdit(order),
+                    onDelete: () => widget.onDelete(order),
+                    onPlan: () async {
+                      final changed = await showPomgtDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => _PlanningDialog(order: order),
+                      );
+                      if (changed == true && mounted) _reload();
+                    },
+                    onOperatorDisplay: () => _openOperatorDisplay(product),
+                    onPreviewPdf: _previewPdf,
+                    onDownloadPdf: _downloadPdf,
+                  ),
                 ),
-              ),
-              _ProductionKpis(data: data),
-              _ProductionTabs(
-                selected: _tab,
-                onChanged: (value) => setState(() => _tab = value),
-              ),
-              Expanded(
-                child: IndexedStack(
-                  index: _tab,
-                  children: [
-                    _SummaryTab(data: data),
-                    _OperationsTab(data: data, onChanged: _reload),
-                    _MaterialsTab(data: data, onChanged: _reload),
-                    _QualityTab(data: data, onChanged: _reload),
-                    _CostsTab(data: data, onChanged: _reload),
-                    Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: LinkedDocumentsPanel(
-                        entityField: 'production_order_id',
-                        entityId: widget.orderId,
-                        title: 'Documentos de la orden de producción',
-                        help:
-                            'Instructivos, artes, especificaciones, evidencia fotográfica, certificados, reportes y PDFs generados por POMGT.',
-                        documentTypes: const [
-                          'Orden de producción',
-                          'Instructivo',
-                          'Diseño / arte',
-                          'Especificación',
-                          'Evidencia fotográfica',
-                          'Certificado de calidad',
-                          'Reporte',
-                          'Otro',
-                        ],
-                      ),
-                    ),
-                    _ActivityTab(data: data),
-                  ],
+                SliverToBoxAdapter(child: _ProductionKpis(data: data)),
+                SliverToBoxAdapter(
+                  child: _ProductionTabs(
+                    selected: _tab,
+                    onChanged: (value) => setState(() => _tab = value),
+                  ),
                 ),
-              ),
-            ],
+                SliverFillRemaining(
+                  hasScrollBody: true,
+                  child: PomgtChangeMotion(
+                    value: _tab,
+                    child: IndexedStack(
+                      index: _tab,
+                      children: [
+                        _SummaryTab(data: data, orderId: widget.orderId),
+                        _OperationsTab(data: data),
+                        _MaterialsTab(data: data, onChanged: _reload),
+                        _QualityTab(data: data, onChanged: _reload),
+                        _CostsTab(data: data, onChanged: _reload),
+                        Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: LinkedDocumentsPanel(
+                            entityField: 'production_order_id',
+                            entityId: widget.orderId,
+                            title: 'Documentos de la orden de producción',
+                            help: 'Instructivos, artes, especificaciones, evidencia fotográfica, certificados, reportes y PDFs generados por POMGT.',
+                            documentTypes: const [
+                              'Orden de producción',
+                              'Instructivo',
+                              'Diseño / arte',
+                              'Especificación',
+                              'Evidencia fotográfica',
+                              'Certificado de calidad',
+                              'Reporte',
+                              'Otro',
+                            ],
+                          ),
+                        ),
+                        _ActivityTab(data: data),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -1195,10 +2226,12 @@ class _ProductionHero extends StatelessWidget {
     required this.onResume,
     required this.onComplete,
     required this.onCancel,
+    required this.onEdit,
+    required this.onDelete,
     required this.onPlan,
     required this.onOperatorDisplay,
     required this.onPreviewPdf,
-    required this.onSavePdf,
+    required this.onDownloadPdf,
   });
   final Map<String, dynamic> data;
   final VoidCallback? onPrepare;
@@ -1207,10 +2240,12 @@ class _ProductionHero extends StatelessWidget {
   final VoidCallback? onResume;
   final VoidCallback? onComplete;
   final VoidCallback? onCancel;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
   final VoidCallback onPlan;
   final VoidCallback onOperatorDisplay;
   final VoidCallback onPreviewPdf;
-  final VoidCallback onSavePdf;
+  final VoidCallback onDownloadPdf;
 
   @override
   Widget build(BuildContext context) {
@@ -1252,7 +2287,7 @@ class _ProductionHero extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 21,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -1283,20 +2318,21 @@ class _ProductionHero extends StatelessWidget {
             children: [
               TextButton.icon(
                 onPressed: onPlan,
-                icon: const Icon(CupertinoIcons.calendar, size: 16),
+                icon: const Icon(LucideIcons.calendar, size: 16),
                 label: const Text('Planeación'),
               ),
               FilledButton.icon(
                 onPressed: onOperatorDisplay,
-                icon: const Icon(Icons.smart_display_outlined, size: 17),
+                icon: const Icon(LucideIcons.monitorPlay, size: 17),
                 label: const Text('Display operador'),
               ),
               PopupMenuButton<String>(
+                popUpAnimationStyle: PomgtMotion.style(context),
                 tooltip: 'PDF y documentos',
-                icon: const Icon(CupertinoIcons.doc_text, size: 18),
+                icon: const Icon(LucideIcons.fileText, size: 18),
                 onSelected: (value) {
                   if (value == 'preview') onPreviewPdf();
-                  if (value == 'save') onSavePdf();
+                  if (value == 'download') onDownloadPdf();
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(
@@ -1304,56 +2340,78 @@ class _ProductionHero extends StatelessWidget {
                     child: Text('Previsualizar / imprimir PDF'),
                   ),
                   PopupMenuItem(
-                    value: 'save',
-                    child: Text('Guardar PDF en Documentos'),
+                    value: 'download',
+                    child: Text('Descargar PDF'),
                   ),
                 ],
               ),
               if (onPrepare != null)
                 FilledButton.icon(
                   onPressed: onPrepare,
-                  icon: const Icon(Icons.inventory_2_outlined, size: 17),
+                  icon: const Icon(LucideIcons.package, size: 17),
                   label: const Text('Preparar OP'),
                 ),
               if (onStart != null)
                 FilledButton.icon(
                   onPressed: onStart,
-                  icon: const Icon(CupertinoIcons.play, size: 17),
+                  icon: const Icon(LucideIcons.play, size: 17),
                   label: const Text('Iniciar producción'),
                 ),
               if (onPause != null)
                 OutlinedButton.icon(
                   onPressed: onPause,
-                  icon: const Icon(CupertinoIcons.pause, size: 17),
+                  icon: const Icon(LucideIcons.pause, size: 17),
                   label: const Text('Pausar'),
                 ),
               if (onResume != null)
                 FilledButton.icon(
                   onPressed: onResume,
-                  icon: const Icon(CupertinoIcons.play, size: 17),
+                  icon: const Icon(LucideIcons.play, size: 17),
                   label: const Text('Reanudar'),
                 ),
               if (onComplete != null)
                 FilledButton.icon(
                   onPressed: onComplete,
-                  icon: const Icon(CupertinoIcons.check_mark, size: 17),
+                  icon: const Icon(LucideIcons.check, size: 17),
                   label: const Text('Completar'),
                 ),
               PopupMenuButton<String>(
+                popUpAnimationStyle: PomgtMotion.style(context),
                 tooltip: 'Más acciones',
-                icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 18),
+                icon: const Icon(LucideIcons.ellipsisVertical, size: 18),
                 onSelected: (value) {
+                  if (value == 'edit') onEdit();
+                  if (value == 'delete') onDelete();
                   if (value == 'cancel' && onCancel != null) onCancel!();
                 },
                 itemBuilder: (_) => [
-                  if (onCancel != null)
-                    const PopupMenuItem(
-                      value: 'cancel',
-                      child: Text(
-                        'Cancelar orden',
-                        style: TextStyle(color: PomgtColors.danger),
-                      ),
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.pencil, size: 17),
+                        SizedBox(width: 9),
+                        Text('Editar'),
+                      ],
                     ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.trash2,
+                          size: 17,
+                          color: PomgtColors.danger,
+                        ),
+                        SizedBox(width: 9),
+                        Text(
+                          'Eliminar',
+                          style: TextStyle(color: PomgtColors.danger),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -1413,34 +2471,34 @@ class _ProductionKpis extends StatelessWidget {
       _KpiData(
         'Cantidad',
         '${_fmt(order['planned_quantity'])} ${order['uom_symbol'] ?? ''}',
-        Icons.numbers_outlined,
+        LucideIcons.hash,
       ),
       _KpiData(
         'Avance',
         '${_fmt(order['progress_pct'])}%',
-        CupertinoIcons.chart_bar,
+        LucideIcons.chartColumn,
       ),
       _KpiData(
         'Operaciones',
         '$completedOps / ${operations.length}',
-        Icons.account_tree_outlined,
+        LucideIcons.gitBranch,
       ),
-      _KpiData('Materiales', '${materials.length}', Icons.layers_outlined),
+      _KpiData('Materiales', '${materials.length}', LucideIcons.layers),
       _KpiData(
         'Calidad pendiente',
         '$pendingQuality',
-        Icons.fact_check_outlined,
+        LucideIcons.clipboardCheck,
       ),
-      _KpiData('Verificaciones', '$pendingChecklist', Icons.checklist_outlined),
+      _KpiData('Verificaciones', '$pendingChecklist', LucideIcons.listChecks),
       _KpiData(
         'Fecha requerida',
         _date(order['required_at']),
-        CupertinoIcons.calendar,
+        LucideIcons.calendar,
       ),
       _KpiData(
         'Costo real',
         '${costs['currency_code'] ?? 'MXN'} \$${totalCost.toStringAsFixed(2)}',
-        Icons.payments_outlined,
+        LucideIcons.banknote,
       ),
     ];
     return Container(
@@ -1486,7 +2544,7 @@ class _ProductionKpis extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontSize: 13.5,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                               Text(
@@ -1496,7 +2554,7 @@ class _ProductionKpis extends StatelessWidget {
                                 style: const TextStyle(
                                   color: PomgtColors.muted,
                                   fontSize: 10.5,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
@@ -1551,7 +2609,11 @@ class _ProductionTabs extends StatelessWidget {
               for (var i = 0; i < labels.length; i++)
                 InkWell(
                   onTap: () => onChanged(i),
-                  child: Container(
+                  hoverColor: PomgtColors.blue.withValues(alpha: .06),
+                  highlightColor: PomgtColors.blue.withValues(alpha: .10),
+                  child: AnimatedContainer(
+                    duration: PomgtMotion.duration(context, PomgtMotion.fast),
+                    curve: PomgtMotion.curve,
                     height: 45,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
@@ -1573,8 +2635,8 @@ class _ProductionTabs extends StatelessWidget {
                             : PomgtColors.muted,
                         fontSize: 12,
                         fontWeight: i == selected
-                            ? FontWeight.w900
-                            : FontWeight.w700,
+                            ? FontWeight.w600
+                            : FontWeight.w500,
                       ),
                     ),
                   ),
@@ -1588,8 +2650,9 @@ class _ProductionTabs extends StatelessWidget {
 }
 
 class _SummaryTab extends StatelessWidget {
-  const _SummaryTab({required this.data});
+  const _SummaryTab({required this.data, required this.orderId});
   final Map<String, dynamic> data;
+  final String orderId;
 
   @override
   Widget build(BuildContext context) {
@@ -1600,157 +2663,172 @@ class _SummaryTab extends StatelessWidget {
     final operations = _list(data['operations']);
     final materials = _list(data['materials']);
     final events = _list(data['events']);
-    return SingleChildScrollView(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final horizontal = constraints.maxWidth >= 980;
-          final left = Column(
-            children: [
-              _Panel(
-                title: 'Información de la orden',
-                icon: Icons.precision_manufacturing_outlined,
-                child: _InfoGrid(
-                  items: [
-                    _Info('Número de OP', order['op_number']),
-                    _Info('Origen', _sourceLabel(order['source_type'])),
-                    _Info(
-                      'Producto',
-                      '${product['sku'] ?? '—'} · ${product['name'] ?? '—'}',
-                    ),
-                    _Info(
-                      'Cantidad',
-                      '${_fmt(order['planned_quantity'])} ${order['uom_symbol'] ?? ''}',
-                    ),
-                    _Info(
-                      'Estado',
-                      UiCopy.enumLabel(order['status']?.toString() ?? ''),
-                    ),
-                    _Info(
-                      'Prioridad',
-                      UiCopy.enumLabel(order['priority']?.toString() ?? ''),
-                    ),
-                    _Info(
-                      'Inicio planificado',
-                      _dateTime(order['planned_start_at']),
-                    ),
-                    _Info(
-                      'Fin planificado',
-                      _dateTime(order['planned_end_at']),
-                    ),
-                    _Info('Fecha requerida', _dateTime(order['required_at'])),
-                    _Info('Inicio real', _dateTime(order['actual_start_at'])),
-                    _Info('Fin real', _dateTime(order['actual_end_at'])),
-                    _Info('Notas', order['notes']),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              _Panel(
-                title: 'Estructura congelada de fabricación',
-                icon: Icons.account_tree_outlined,
-                child: _InfoGrid(
-                  items: [
-                    _Info(
-                      'BOM / Lista de materiales',
-                      '${order['bom_code'] ?? '—'} · ${order['bom_revision_code'] ?? '—'}',
-                    ),
-                    _Info(
-                      'Ruta de fabricación',
-                      '${order['routing_code'] ?? '—'} · ${order['routing_revision_code'] ?? '—'}',
-                    ),
-                    _Info('Operaciones', operations.length),
-                    _Info('Materiales / componentes', materials.length),
-                    _Info('Preparada el', _dateTime(order['prepared_at'])),
-                    _Info(
-                      'Versión de snapshot',
-                      order['snapshot_version'] ?? 1,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-          final right = Column(
-            children: [
-              _Panel(
-                title: 'Origen comercial',
-                icon: CupertinoIcons.doc_plaintext,
-                child: customerOrder.isEmpty
-                    ? const _EmptyText(
-                        'Esta OP corresponde a producción interna o no tiene un pedido vinculado.',
-                      )
-                    : _InfoGrid(
-                        items: [
-                          _Info(
-                            'Cliente',
-                            customer['trade_name'] ?? customer['legal_name'],
-                          ),
-                          _Info('Pedido', customerOrder['order_number']),
-                          _Info(
-                            'OC del cliente',
-                            customerOrder['customer_po_number'],
-                          ),
-                          _Info(
-                            'Referencia externa',
-                            customerOrder['external_reference'],
-                          ),
-                          _Info(
-                            'Entrega solicitada',
-                            _date(customerOrder['requested_delivery_date']),
-                          ),
-                          _Info(
-                            'Condición / moneda',
-                            '${customerOrder['currency_code'] ?? '—'}',
-                          ),
-                        ],
+      builder: (context, controller) => SingleChildScrollView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final horizontal = constraints.maxWidth >= 980;
+            final left = Column(
+              children: [
+                _Panel(
+                  title: 'Información de la orden',
+                  icon: LucideIcons.factory,
+                  child: _InfoGrid(
+                    items: [
+                      _Info('Número de OP', order['op_number']),
+                      if (order['batch_number'] != null)
+                        _Info('Lote', order['batch_number']),
+                      _Info('Origen', _sourceLabel(order['source_type'])),
+                      _Info(
+                        'Producto',
+                        '${product['sku'] ?? '—'} · ${product['name'] ?? '—'}',
                       ),
-              ),
-              const SizedBox(height: 14),
-              _Panel(
-                title: 'Actividad reciente',
-                icon: CupertinoIcons.clock,
-                child: events.isEmpty
-                    ? const _EmptyText('No hay actividad registrada todavía.')
-                    : Column(
-                        children: [
-                          for (final event in events.take(6))
-                            _TimelineRow(
-                              title: event['title']?.toString() ?? 'Actividad',
-                              subtitle: event['description']?.toString() ?? '',
-                              date: _dateTime(event['occurred_at']),
-                              color: PomgtColors.blue,
+                      _Info(
+                        'Cantidad',
+                        '${_fmt(order['planned_quantity'])} ${order['uom_symbol'] ?? ''}',
+                      ),
+                      _Info(
+                        'Estado',
+                        UiCopy.enumLabel(order['status']?.toString() ?? ''),
+                      ),
+                      _Info(
+                        'Prioridad',
+                        UiCopy.enumLabel(order['priority']?.toString() ?? ''),
+                      ),
+                      _Info(
+                        'Inicio planificado',
+                        _dateTime(order['planned_start_at']),
+                      ),
+                      _Info(
+                        'Fin planificado',
+                        _dateTime(order['planned_end_at']),
+                      ),
+                      _Info('Fecha requerida', _dateTime(order['required_at'])),
+                      _Info('Inicio real', _dateTime(order['actual_start_at'])),
+                      _Info('Fin real', _dateTime(order['actual_end_at'])),
+                      _Info('Notas', order['notes']),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _OperatorsPanel(orderId: orderId),
+                const SizedBox(height: 14),
+                _Panel(
+                  title: 'Estructura congelada de fabricación',
+                  icon: LucideIcons.gitBranch,
+                  child: _InfoGrid(
+                    items: [
+                      _Info(
+                        'Estructura de fabricación',
+                        '${order['bom_code'] ?? '—'} · ${order['bom_revision_code'] ?? '—'}',
+                      ),
+                      _Info(
+                        'Ruta de fabricación',
+                        '${order['routing_code'] ?? '—'} · ${order['routing_revision_code'] ?? '—'}',
+                      ),
+                      _Info('Operaciones', operations.length),
+                      _Info('Materiales / componentes', materials.length),
+                      _Info('Preparada el', _dateTime(order['prepared_at'])),
+                      _Info(
+                        'Versión de snapshot',
+                        order['snapshot_version'] ?? 1,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+            final right = Column(
+              children: [
+                _Panel(
+                  title: 'Origen comercial',
+                  icon: LucideIcons.fileText,
+                  child: customerOrder.isEmpty
+                      ? const _EmptyText(
+                          'Esta OP corresponde a producción interna o no tiene un pedido vinculado.',
+                        )
+                      : _InfoGrid(
+                          items: [
+                            _Info(
+                              'Cliente',
+                              customer['trade_name'] ?? customer['legal_name'],
                             ),
-                        ],
-                      ),
-              ),
-            ],
-          );
-          if (!horizontal) {
-            return Column(children: [left, const SizedBox(height: 14), right]);
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 3, child: left),
-              const SizedBox(width: 14),
-              Expanded(flex: 2, child: right),
-            ],
-          );
-        },
+                            _Info('Pedido', customerOrder['order_number']),
+                            _Info(
+                              'OC del cliente',
+                              customerOrder['customer_po_number'],
+                            ),
+                            _Info(
+                              'Referencia externa',
+                              customerOrder['external_reference'],
+                            ),
+                            _Info(
+                              'Entrega solicitada',
+                              _date(customerOrder['requested_delivery_date']),
+                            ),
+                            _Info(
+                              'Condición / moneda',
+                              '${customerOrder['currency_code'] ?? '—'}',
+                            ),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 14),
+                _Panel(
+                  title: 'Actividad reciente',
+                  icon: LucideIcons.clock,
+                  child: events.isEmpty
+                      ? const _EmptyText('No hay actividad registrada todavía.')
+                      : Column(
+                          children: [
+                            for (final event in events.take(6))
+                              _TimelineRow(
+                                title:
+                                    event['title']?.toString() ?? 'Actividad',
+                                subtitle:
+                                    event['description']?.toString() ?? '',
+                                date: _dateTime(event['occurred_at']),
+                                color: PomgtColors.blue,
+                              ),
+                          ],
+                        ),
+                ),
+              ],
+            );
+            if (!horizontal) {
+              return Column(
+                children: [left, const SizedBox(height: 14), right],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: left),
+                const SizedBox(width: 14),
+                Expanded(flex: 2, child: right),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 class _OperationsTab extends StatelessWidget {
-  const _OperationsTab({required this.data, required this.onChanged});
+  const _OperationsTab({required this.data});
   final Map<String, dynamic> data;
-  final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
     final rows = _list(data['operations']);
+    final order = _map(data['order']);
+    final noOperationRunning =
+        order['status'] == 'in_progress' &&
+        !rows.any((row) => row['status'] == 'in_progress');
     final workCenters = (data['work_centers'] as Map?) ?? const {};
     final machines = (data['machines'] as Map?) ?? const {};
     final checklist = _list(data['checklist']);
@@ -1762,177 +2840,140 @@ class _OperationsTab extends StatelessWidget {
         ),
       );
     }
-    return ListView.separated(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      itemCount: rows.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final row = rows[index];
-        final operationId = row['id'].toString();
-        final wc =
-            (workCenters[row['work_center_id']?.toString()] as Map?)?['name']
-                ?.toString() ??
-            'Sin centro asignado';
-        final machine =
-            (machines[row['machine_id']?.toString()] as Map?)?['name']
-                ?.toString() ??
-            'Sin máquina asignada';
-        final checks = checklist
-            .where((e) => e['operation_id']?.toString() == operationId)
-            .toList();
-        final q = quality
-            .where((e) => e['operation_id']?.toString() == operationId)
-            .toList();
-        final status = row['status']?.toString() ?? 'pending';
-        return _Panel(
-          title:
-              '${row['sequence_no'] ?? index + 1} · ${row['operation_code'] ?? ''} · ${row['name'] ?? 'Operación'}',
-          icon: Icons.route_outlined,
-          trailing: _StatusText(status: status),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Wrap(
-                spacing: 28,
-                runSpacing: 12,
+      builder: (context, controller) => PomgtListView.separated(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        itemCount: rows.length + (noOperationRunning ? 1 : 0),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (noOperationRunning && index == 0) {
+            return Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: PomgtColors.blue.withValues(alpha: .07),
+                borderRadius: PomgtRadii.borderMd,
+                border: Border.all(
+                  color: PomgtColors.blue.withValues(alpha: .2),
+                ),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _MiniMetric('Centro de trabajo', wc),
-                  _MiniMetric('Máquina', machine),
-                  _MiniMetric(
-                    'Setup',
-                    '${_fmt(row['setup_time_minutes'])} min',
-                  ),
-                  _MiniMetric('Tiempo', _operationTime(row)),
-                  _MiniMetric(
-                    'Cantidad',
-                    '${_fmt(row['completed_quantity'])} / ${_fmt(row['planned_quantity'])}',
-                  ),
-                  _MiniMetric(
-                    'Calidad',
-                    q.isEmpty
-                        ? 'No aplica'
-                        : '${q.where((e) => e['result_status'] == 'passed').length}/${q.length} aprobados',
-                  ),
-                  _MiniMetric(
-                    'Checklist',
-                    checks.isEmpty
-                        ? 'No aplica'
-                        : '${checks.where((e) => e['is_completed'] == true).length}/${checks.length} completados',
+                  Icon(LucideIcons.info, color: PomgtColors.blue, size: 18),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'La OP está abierta en producción, pero todavía no hay un paso activo. Abre el Display del operador para iniciar la primera operación y registrar su máquina.',
+                    ),
                   ),
                 ],
               ),
-              if ((row['instructions']?.toString() ?? '')
-                  .trim()
-                  .isNotEmpty) ...[
-                const SizedBox(height: 13),
-                const Divider(height: 1),
-                const SizedBox(height: 11),
-                Text(
-                  'Instrucciones: ${row['instructions']}',
-                  style: const TextStyle(
-                    color: PomgtColors.secondaryInk,
-                    fontSize: 12.5,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (status == 'ready')
-                    FilledButton.icon(
-                      onPressed: () => _operationAction(
-                        context,
-                        operationId,
-                        'in_progress',
-                        onChanged,
-                      ),
-                      icon: const Icon(CupertinoIcons.play, size: 16),
-                      label: const Text('Iniciar operación'),
+            );
+          }
+          final row = rows[index - (noOperationRunning ? 1 : 0)];
+          final operationId = row['id'].toString();
+          final wc =
+              (workCenters[row['work_center_id']?.toString()] as Map?)?['name']
+                  ?.toString() ??
+              'Sin centro asignado';
+          final machine =
+              (machines[row['machine_id']?.toString()] as Map?)?['name']
+                  ?.toString() ??
+              'Sin máquina asignada';
+          final checks = checklist
+              .where((e) => e['operation_id']?.toString() == operationId)
+              .toList();
+          final q = quality
+              .where((e) => e['operation_id']?.toString() == operationId)
+              .toList();
+          final status = row['status']?.toString() ?? 'pending';
+          return _Panel(
+            title:
+                '${row['sequence_no'] ?? index + 1} · ${row['operation_code'] ?? ''} · ${row['name'] ?? 'Operación'}',
+            icon: LucideIcons.route,
+            trailing: _StatusText(status: status),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Wrap(
+                  spacing: 28,
+                  runSpacing: 12,
+                  children: [
+                    _MiniMetric('Centro de trabajo', wc),
+                    _MiniMetric('Máquina', machine),
+                    _MiniMetric(
+                      'Setup',
+                      '${_fmt(row['setup_time_minutes'])} min',
                     ),
-                  if (status == 'in_progress') ...[
-                    OutlinedButton.icon(
-                      onPressed: () => _operationAction(
-                        context,
-                        operationId,
-                        'on_hold',
-                        onChanged,
-                      ),
-                      icon: const Icon(CupertinoIcons.pause, size: 16),
-                      label: const Text('Pausar'),
+                    _MiniMetric('Tiempo', _operationTime(row)),
+                    _MiniMetric(
+                      'Cantidad',
+                      '${_fmt(row['completed_quantity'])} / ${_fmt(row['planned_quantity'])}',
                     ),
-                    const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        final result = await showDialog<_OperationCompletion>(
-                          context: context,
-                          builder: (_) =>
-                              _CompleteOperationDialog(operation: row),
-                        );
-                        if (result == null || !context.mounted) return;
-                        await _operationAction(
-                          context,
-                          operationId,
-                          'completed',
-                          onChanged,
-                          completed: result.completed,
-                          rejected: result.rejected,
-                          note: result.note,
-                        );
-                      },
-                      icon: const Icon(CupertinoIcons.check_mark, size: 16),
-                      label: const Text('Completar operación'),
+                    _MiniMetric(
+                      'Calidad',
+                      q.isEmpty
+                          ? 'No aplica'
+                          : '${q.where((e) => e['result_status'] == 'passed').length}/${q.length} aprobados',
+                    ),
+                    _MiniMetric(
+                      'Checklist',
+                      checks.isEmpty
+                          ? 'No aplica'
+                          : '${checks.where((e) => e['is_completed'] == true).length}/${checks.length} completados',
                     ),
                   ],
-                  if (status == 'on_hold')
-                    FilledButton.icon(
-                      onPressed: () => _operationAction(
-                        context,
-                        operationId,
-                        'in_progress',
-                        onChanged,
-                      ),
-                      icon: const Icon(CupertinoIcons.play, size: 16),
-                      label: const Text('Reanudar'),
+                ),
+                if ((row['instructions']?.toString() ?? '')
+                    .trim()
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 13),
+                  const Divider(height: 1),
+                  const SizedBox(height: 11),
+                  Text(
+                    'Instrucciones: ${row['instructions']}',
+                    style: const TextStyle(
+                      color: PomgtColors.secondaryInk,
+                      fontSize: 12.5,
                     ),
+                  ),
                 ],
-              ),
-            ],
-          ),
-        );
-      },
+                if (status == 'ready' ||
+                    status == 'in_progress' ||
+                    status == 'on_hold') ...[
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 11),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        LucideIcons.monitorPlay,
+                        size: 14,
+                        color: PomgtColors.muted,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Para iniciar, pausar o completar esta operación usa el Display del operador — ahí se firma cada paso.',
+                          style: TextStyle(
+                            color: PomgtColors.muted,
+                            fontSize: 11.5,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
     );
-  }
-
-  static Future<void> _operationAction(
-    BuildContext context,
-    String operationId,
-    String status,
-    VoidCallback onChanged, {
-    double? completed,
-    double? rejected,
-    String? note,
-  }) async {
-    try {
-      await context.read<ProductionRepository>().transitionOperation(
-        operationId,
-        status,
-        completedQuantity: completed,
-        rejectedQuantity: rejected,
-        note: note,
-      );
-      if (!context.mounted) return;
-      onChanged();
-      _showProductionSuccess(
-        context,
-        status == 'completed'
-            ? 'Operación completada.'
-            : 'Operación actualizada.',
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      _showProductionError(context, e);
-    }
   }
 }
 
@@ -1949,112 +2990,118 @@ class _MaterialsTab extends StatelessWidget {
     if (rows.isEmpty) {
       return const Center(
         child: _EmptyText(
-          'No hay materiales congelados. Prepara la OP para calcular los requerimientos del BOM.',
+          'No hay materiales congelados. Prepara la OP para calcular los requerimientos de la estructura de fabricación.',
         ),
       );
     }
-    return ListView(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      children: [
-        _Panel(
-          title: 'Materiales requeridos para la orden',
-          icon: Icons.layers_outlined,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final tableWidth = constraints.maxWidth < 860
-                  ? 860.0
-                  : constraints.maxWidth;
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: tableWidth,
-                  child: Column(
-                    children: [
-                      const _TableHeader(
-                        columns: [
-                          'Material',
-                          'Tipo',
-                          'Requerido',
-                          'Surtido',
-                          'Consumido',
-                          'Devuelto',
-                          'Merma',
-                          'Acción',
-                        ],
-                      ),
-                      for (final row in rows)
-                        _MaterialRow(
-                          row: row,
-                          product: _map(
-                            products[row['material_product_id']?.toString()],
-                          ),
-                          unit: _map(units[row['uom_id']?.toString()]),
-                          onMove: () async {
-                            final request =
-                                await showDialog<_MaterialMovementRequest>(
-                                  context: context,
-                                  builder: (_) => _MaterialMovementDialog(
-                                    materialName:
-                                        _map(
-                                          products[row['material_product_id']
-                                              ?.toString()],
-                                        )['name']?.toString() ??
-                                        'Material',
-                                  ),
-                                );
-                            if (request == null || !context.mounted) return;
-                            try {
-                              await context
-                                  .read<ProductionRepository>()
-                                  .materialMovement(
-                                    materialId: row['id'].toString(),
-                                    movementType: request.type,
-                                    quantity: request.quantity,
-                                    lotNumber: request.lot,
-                                    warehouseReference: request.warehouse,
-                                    note: request.note,
+      builder: (context, controller) => PomgtListView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _Panel(
+            title: 'Materiales requeridos para la orden',
+            icon: LucideIcons.layers,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final tableWidth = constraints.maxWidth < 860
+                    ? 860.0
+                    : constraints.maxWidth;
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: tableWidth,
+                    child: Column(
+                      children: [
+                        const _TableHeader(
+                          columns: [
+                            'Material',
+                            'Tipo',
+                            'Requerido',
+                            'Surtido',
+                            'Consumido',
+                            'Devuelto',
+                            'Merma',
+                            'Acción',
+                          ],
+                        ),
+                        for (final row in rows)
+                          _MaterialRow(
+                            row: row,
+                            product: _map(
+                              products[row['material_product_id']?.toString()],
+                            ),
+                            unit: _map(units[row['uom_id']?.toString()]),
+                            onMove: () async {
+                              final request =
+                                  await showPomgtDialog<
+                                    _MaterialMovementRequest
+                                  >(
+                                    context: context,
+                                    builder: (_) => _MaterialMovementDialog(
+                                      materialName:
+                                          _map(
+                                            products[row['material_product_id']
+                                                ?.toString()],
+                                          )['name']?.toString() ??
+                                          'Material',
+                                    ),
                                   );
-                              if (!context.mounted) return;
-                              onChanged();
-                              _showProductionSuccess(
-                                context,
-                                'Movimiento de material registrado.',
-                              );
-                            } catch (e) {
-                              if (!context.mounted) return;
-                              _showProductionError(context, e);
-                            }
-                          },
+                              if (request == null || !context.mounted) return;
+                              try {
+                                await context
+                                    .read<ProductionRepository>()
+                                    .materialMovement(
+                                      materialId: row['id'].toString(),
+                                      movementType: request.type,
+                                      quantity: request.quantity,
+                                      lotNumber: request.lot,
+                                      warehouseReference: request.warehouse,
+                                      note: request.note,
+                                    );
+                                if (!context.mounted) return;
+                                onChanged();
+                                _showProductionSuccess(
+                                  context,
+                                  'Movimiento de material registrado.',
+                                );
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                _showProductionError(context, e);
+                              }
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 14),
+          _Panel(
+            title: 'Movimientos recientes',
+            icon: LucideIcons.arrowRightLeft,
+            child: _list(data['movements']).isEmpty
+                ? const _EmptyText(
+                    'Todavía no hay movimientos de material en esta OP.',
+                  )
+                : Column(
+                    children: [
+                      for (final move in _list(data['movements']).take(12))
+                        _TimelineRow(
+                          title: _movementLabel(move['movement_type']),
+                          subtitle:
+                              '${_fmt(move['quantity'])} · ${move['lot_number'] == null ? 'Sin lote' : 'Lote ${move['lot_number']}'}',
+                          date: _dateTime(move['occurred_at']),
+                          color: PomgtColors.blue,
                         ),
                     ],
                   ),
-                ),
-              );
-            },
           ),
-        ),
-        const SizedBox(height: 14),
-        _Panel(
-          title: 'Movimientos recientes',
-          icon: CupertinoIcons.arrow_right_arrow_left,
-          child: _list(data['movements']).isEmpty
-              ? const _EmptyText(
-                  'Todavía no hay movimientos de material en esta OP.',
-                )
-              : Column(
-                  children: [
-                    for (final move in _list(data['movements']).take(12))
-                      _TimelineRow(
-                        title: _movementLabel(move['movement_type']),
-                        subtitle:
-                            '${_fmt(move['quantity'])} · ${move['lot_number'] == null ? 'Sin lote' : 'Lote ${move['lot_number']}'}',
-                        date: _dateTime(move['occurred_at']),
-                        color: PomgtColors.blue,
-                      ),
-                  ],
-                ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -2071,96 +3118,104 @@ class _QualityTab extends StatelessWidget {
     final operations = {
       for (final row in _list(data['operations'])) row['id'].toString(): row,
     };
-    return ListView(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      children: [
-        _Panel(
-          title: 'Controles de calidad',
-          icon: Icons.fact_check_outlined,
-          child: quality.isEmpty
-              ? const _EmptyText(
-                  'La ruta de esta OP no contiene controles de calidad.',
-                )
-              : Column(
-                  children: [
-                    for (final row in quality)
-                      _QualityRow(
-                        row: row,
-                        operation: operations[row['operation_id']?.toString()],
-                        onCapture: () async {
-                          final result = await showDialog<_QualityCapture>(
-                            context: context,
-                            builder: (_) => _QualityDialog(check: row),
-                          );
-                          if (result == null || !context.mounted) return;
-                          try {
-                            await context
-                                .read<ProductionRepository>()
-                                .recordQuality(
-                                  checkId: row['id'].toString(),
-                                  resultValue: result.value,
-                                  note: result.note,
-                                  forceStatus: result.forceStatus,
+      builder: (context, controller) => PomgtListView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _Panel(
+            title: 'Controles de calidad',
+            icon: LucideIcons.clipboardCheck,
+            child: quality.isEmpty
+                ? const _EmptyText(
+                    'La ruta de esta OP no contiene controles de calidad.',
+                  )
+                : Column(
+                    children: [
+                      for (final row in quality)
+                        _QualityRow(
+                          row: row,
+                          operation:
+                              operations[row['operation_id']?.toString()],
+                          onCapture: () async {
+                            final result =
+                                await showPomgtDialog<_QualityCapture>(
+                                  context: context,
+                                  builder: (_) => _QualityDialog(check: row),
                                 );
-                            if (!context.mounted) return;
-                            onChanged();
-                            _showProductionSuccess(
-                              context,
-                              'Resultado de calidad registrado.',
-                            );
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            _showProductionError(context, e);
-                          }
-                        },
-                      ),
-                  ],
-                ),
-        ),
-        const SizedBox(height: 14),
-        _Panel(
-          title: 'Lista de verificación operativa',
-          icon: Icons.checklist_outlined,
-          child: checklist.isEmpty
-              ? const _EmptyText(
-                  'La ruta de esta OP no contiene listas de verificación.',
-                )
-              : Column(
-                  children: [
-                    for (final row in checklist)
-                      _ChecklistRow(
-                        row: row,
-                        operation: operations[row['operation_id']?.toString()],
-                        onCapture: () async {
-                          final response = await showDialog<_ChecklistCapture>(
-                            context: context,
-                            builder: (_) => _ChecklistDialog(item: row),
-                          );
-                          if (response == null || !context.mounted) return;
-                          try {
-                            await context
-                                .read<ProductionRepository>()
-                                .answerChecklist(
-                                  itemId: row['id'].toString(),
-                                  response: response.value,
-                                  note: response.note,
+                            if (result == null || !context.mounted) return;
+                            try {
+                              await context
+                                  .read<ProductionRepository>()
+                                  .recordQuality(
+                                    checkId: row['id'].toString(),
+                                    resultValue: result.value,
+                                    note: result.note,
+                                    forceStatus: result.forceStatus,
+                                  );
+                              if (!context.mounted) return;
+                              onChanged();
+                              _showProductionSuccess(
+                                context,
+                                'Resultado de calidad registrado.',
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              _showProductionError(context, e);
+                            }
+                          },
+                        ),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 14),
+          _Panel(
+            title: 'Lista de verificación operativa',
+            icon: LucideIcons.listChecks,
+            child: checklist.isEmpty
+                ? const _EmptyText(
+                    'La ruta de esta OP no contiene listas de verificación.',
+                  )
+                : Column(
+                    children: [
+                      for (final row in checklist)
+                        _ChecklistRow(
+                          row: row,
+                          operation:
+                              operations[row['operation_id']?.toString()],
+                          onCapture: () async {
+                            final response =
+                                await showPomgtDialog<_ChecklistCapture>(
+                                  context: context,
+                                  builder: (_) => _ChecklistDialog(item: row),
                                 );
-                            if (!context.mounted) return;
-                            onChanged();
-                            _showProductionSuccess(
-                              context,
-                              'Verificación registrada.',
-                            );
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            _showProductionError(context, e);
-                          }
-                        },
-                      ),
-                  ],
-                ),
-        ),
-      ],
+                            if (response == null || !context.mounted) return;
+                            try {
+                              await context
+                                  .read<ProductionRepository>()
+                                  .answerChecklist(
+                                    itemId: row['id'].toString(),
+                                    response: response.value,
+                                    note: response.note,
+                                  );
+                              if (!context.mounted) return;
+                              onChanged();
+                              _showProductionSuccess(
+                                context,
+                                'Verificación registrada.',
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              _showProductionError(context, e);
+                            }
+                          },
+                        ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2184,91 +3239,95 @@ class _CostsTab extends StatelessWidget {
     final variance = estimated == 0
         ? 0
         : ((actual - estimated) / estimated) * 100;
-    return ListView(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      children: [
-        _Panel(
-          title: 'Costo estimado vs. real',
-          icon: Icons.payments_outlined,
-          trailing: TextButton.icon(
-            onPressed: () async {
-              final changed = await showDialog<bool>(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) => _CostDialog(costs: costs),
-              );
-              if (changed == true && context.mounted) onChanged();
-            },
-            icon: const Icon(CupertinoIcons.pencil, size: 15),
-            label: const Text('Actualizar costos'),
+      builder: (context, controller) => PomgtListView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _Panel(
+            title: 'Costo estimado vs. real',
+            icon: LucideIcons.banknote,
+            trailing: TextButton.icon(
+              onPressed: () async {
+                final changed = await showPomgtDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => _CostDialog(costs: costs),
+                );
+                if (changed == true && context.mounted) onChanged();
+              },
+              icon: const Icon(LucideIcons.pencil, size: 15),
+              label: const Text('Actualizar costos'),
+            ),
+            child: Column(
+              children: [
+                _CostLine(
+                  'Materiales',
+                  costs['estimated_material'],
+                  costs['actual_material'],
+                  currency,
+                ),
+                _CostLine(
+                  'Mano de obra',
+                  costs['estimated_labor'],
+                  costs['actual_labor'],
+                  currency,
+                ),
+                _CostLine(
+                  'Máquina',
+                  costs['estimated_machine'],
+                  costs['actual_machine'],
+                  currency,
+                ),
+                _CostLine(
+                  'Subcontrato',
+                  costs['estimated_subcontract'],
+                  costs['actual_subcontract'],
+                  currency,
+                ),
+                _CostLine(
+                  'Indirectos',
+                  costs['estimated_overhead'],
+                  costs['actual_overhead'],
+                  currency,
+                ),
+                const Divider(height: 24),
+                _CostLine('TOTAL', estimated, actual, currency, strong: true),
+              ],
+            ),
           ),
-          child: Column(
+          const SizedBox(height: 14),
+          Row(
             children: [
-              _CostLine(
-                'Materiales',
-                costs['estimated_material'],
-                costs['actual_material'],
-                currency,
+              Expanded(
+                child: _MetricPanel(
+                  title: 'Costo estimado',
+                  value: '$currency \$${estimated.toStringAsFixed(2)}',
+                  caption: 'Base de planeación',
+                ),
               ),
-              _CostLine(
-                'Mano de obra',
-                costs['estimated_labor'],
-                costs['actual_labor'],
-                currency,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricPanel(
+                  title: 'Costo real',
+                  value: '$currency \$${actual.toStringAsFixed(2)}',
+                  caption: 'Acumulado registrado',
+                ),
               ),
-              _CostLine(
-                'Máquina',
-                costs['estimated_machine'],
-                costs['actual_machine'],
-                currency,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricPanel(
+                  title: 'Variación',
+                  value:
+                      '${variance >= 0 ? '+' : ''}${variance.toStringAsFixed(2)}%',
+                  caption: 'Real contra estimado',
+                ),
               ),
-              _CostLine(
-                'Subcontrato',
-                costs['estimated_subcontract'],
-                costs['actual_subcontract'],
-                currency,
-              ),
-              _CostLine(
-                'Indirectos',
-                costs['estimated_overhead'],
-                costs['actual_overhead'],
-                currency,
-              ),
-              const Divider(height: 24),
-              _CostLine('TOTAL', estimated, actual, currency, strong: true),
             ],
           ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _MetricPanel(
-                title: 'Costo estimado',
-                value: '$currency \$${estimated.toStringAsFixed(2)}',
-                caption: 'Base de planeación',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _MetricPanel(
-                title: 'Costo real',
-                value: '$currency \$${actual.toStringAsFixed(2)}',
-                caption: 'Acumulado registrado',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _MetricPanel(
-                title: 'Variación',
-                value:
-                    '${variance >= 0 ? '+' : ''}${variance.toStringAsFixed(2)}%',
-                caption: 'Real contra estimado',
-              ),
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -2279,33 +3338,443 @@ class _ActivityTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = _list(data['events']);
-    return ListView(
+    return ScrollToTopArea(
       padding: const EdgeInsets.all(16),
-      children: [
-        _Panel(
-          title: 'Bitácora de la orden de producción',
-          icon: CupertinoIcons.clock,
-          child: rows.isEmpty
-              ? const _EmptyText('Todavía no existe actividad registrada.')
-              : Column(
-                  children: [
-                    for (final event in rows)
-                      _TimelineRow(
-                        title: event['title']?.toString() ?? 'Actividad',
-                        subtitle:
-                            event['description']?.toString() ??
-                            _eventLabel(event['event_type']),
-                        date: _dateTime(event['occurred_at']),
-                        color: _statusColor(
-                          event['new_status']?.toString() ?? '',
+      builder: (context, controller) => PomgtListView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _Panel(
+            title: 'Bitácora de la orden de producción',
+            icon: LucideIcons.clock,
+            child: rows.isEmpty
+                ? const _EmptyText('Todavía no existe actividad registrada.')
+                : Column(
+                    children: [
+                      for (final event in rows)
+                        _TimelineRow(
+                          title: event['title']?.toString() ?? 'Actividad',
+                          subtitle:
+                              event['description']?.toString() ??
+                              _eventLabel(event['event_type']),
+                          date: _dateTime(event['occurred_at']),
+                          color: _statusColor(
+                            event['new_status']?.toString() ?? '',
+                          ),
                         ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OperatorsPanel extends StatefulWidget {
+  const _OperatorsPanel({required this.orderId});
+  final String orderId;
+
+  @override
+  State<_OperatorsPanel> createState() => _OperatorsPanelState();
+}
+
+class _OperatorsPanelState extends State<_OperatorsPanel> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<List<Map<String, dynamic>>> _load() {
+    return context.read<GenericRepository>().listRows(
+      Phase1Schema.tables['production_order_operators']!,
+      filters: {'production_order_id': widget.orderId},
+    );
+  }
+
+  void _reload() => setState(() {
+    _future = _load();
+  });
+
+  Future<void> _unassign(Map<String, dynamic> row) async {
+    try {
+      await context.read<GenericRepository>().deleteRow(
+        Phase1Schema.tables['production_order_operators']!,
+        row,
+      );
+      _reload();
+    } catch (e) {
+      if (mounted) _showProductionError(context, e);
+    }
+  }
+
+  Future<void> _openAssignDialog(List<Map<String, dynamic>> assigned) async {
+    final changed = await showPomgtDialog<bool>(
+      context: context,
+      builder: (_) =>
+          _AssignOperatorsDialog(orderId: widget.orderId, assigned: assigned),
+    );
+    if (changed == true) _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _future,
+      builder: (context, snapshot) {
+        final assigned = snapshot.data ?? const <Map<String, dynamic>>[];
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: context.read<LookupRepository>().rows('organization_members'),
+          builder: (context, memberSnap) {
+            final members = {
+              for (final m in memberSnap.data ?? const <Map<String, dynamic>>[])
+                m['id'].toString(): m,
+            };
+            return _Panel(
+              title: 'Operadores asignados',
+              icon: LucideIcons.users,
+              trailing: TextButton.icon(
+                onPressed: () => _openAssignDialog(assigned),
+                icon: const Icon(LucideIcons.pencil, size: 15),
+                label: const Text('Asignar'),
+              ),
+              child: assigned.isEmpty
+                  ? const _EmptyText(
+                      'Sin operadores asignados. Puedes asignar uno o varios.',
+                    )
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final row in assigned)
+                          _OperatorChip(
+                            name:
+                                members[row['member_id']
+                                        ?.toString()]?['full_name']
+                                    ?.toString() ??
+                                'Operador',
+                            lead: row['role']?.toString() == 'lead',
+                            onRemove: () => _unassign(row),
+                          ),
+                      ],
+                    ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _OperatorChip extends StatelessWidget {
+  const _OperatorChip({
+    required this.name,
+    required this.lead,
+    required this.onRemove,
+  });
+  final String name;
+  final bool lead;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
+    decoration: BoxDecoration(
+      color: lead ? PomgtColors.blueSoft : PomgtColors.surfaceAlt,
+      borderRadius: PomgtRadii.borderPill,
+      border: Border.all(
+        color: lead ? PomgtColors.blue.withValues(alpha: .3) : PomgtColors.line,
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          LucideIcons.circleUserRound,
+          size: 15,
+          color: lead ? PomgtColors.blue : PomgtColors.muted,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          name,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: lead ? PomgtColors.blue : PomgtColors.ink,
+          ),
+        ),
+        if (lead) ...[
+          const SizedBox(width: 4),
+          const Text(
+            '· líder',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: PomgtColors.blue,
+            ),
+          ),
+        ],
+        InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onRemove,
+          child: const Padding(
+            padding: EdgeInsets.all(4),
+            child: Icon(LucideIcons.x, size: 12, color: PomgtColors.muted),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AssignOperatorsDialog extends StatefulWidget {
+  const _AssignOperatorsDialog({required this.orderId, required this.assigned});
+  final String orderId;
+  final List<Map<String, dynamic>> assigned;
+
+  @override
+  State<_AssignOperatorsDialog> createState() => _AssignOperatorsDialogState();
+}
+
+class _AssignOperatorsDialogState extends State<_AssignOperatorsDialog> {
+  late Future<List<List<Map<String, dynamic>>>> _operatorsFuture;
+  late final Set<String> _selected;
+  String? _leadId;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _operatorsFuture = Future.wait([
+      context.read<GenericRepository>().listRows(
+        Phase1Schema.tables['organization_members']!,
+      ),
+      context.read<RolesRepository>().roles(),
+    ]);
+    _selected = {
+      for (final row in widget.assigned) row['member_id'].toString(),
+    };
+    final lead = widget.assigned
+        .where((row) => row['role']?.toString() == 'lead')
+        .toList();
+    _leadId = lead.isEmpty ? null : lead.first['member_id']?.toString();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final repository = context.read<GenericRepository>();
+    final spec = Phase1Schema.tables['production_order_operators']!;
+    try {
+      final currentIds = {
+        for (final row in widget.assigned) row['member_id'].toString(): row,
+      };
+      for (final id in _selected.difference(currentIds.keys.toSet())) {
+        await repository.createRow(spec, {
+          'production_order_id': widget.orderId,
+          'member_id': id,
+          'role': id == _leadId ? 'lead' : 'operator',
+        });
+      }
+      for (final id in currentIds.keys.toSet().difference(_selected)) {
+        await repository.deleteRow(spec, currentIds[id]!);
+      }
+      for (final id in _selected) {
+        final current = currentIds[id];
+        final shouldBeLead = id == _leadId;
+        final isLead = current?['role']?.toString() == 'lead';
+        if (current != null && shouldBeLead != isLead) {
+          await repository.updateRow(spec, current['id'].toString(), {
+            'role': shouldBeLead ? 'lead' : 'operator',
+          });
+        }
+      }
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        _showProductionError(context, e);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(LucideIcons.users, color: PomgtColors.ink, size: 20),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Asignar operadores')),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: _saving ? null : () => Navigator.pop(context),
+            icon: const Icon(LucideIcons.x, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: _responsiveDialogWidth(context, 420),
+        child: FutureBuilder<List<List<Map<String, dynamic>>>>(
+          future: _operatorsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox(height: 160, child: PomgtLoading());
+            }
+            final data = snapshot.data;
+            final operators =
+                (data == null ? const <Map<String, dynamic>>[] : data[0])
+                    .where((o) => o['is_active'] != false)
+                    .toList();
+            final roleNames = {
+              for (final r
+                  in (data == null ? const <Map<String, dynamic>>[] : data[1]))
+                r['id'].toString(): r['name']?.toString(),
+            };
+            if (operators.isEmpty) {
+              return const _EmptyText(
+                'No hay miembros activos. Invita miembros desde Roles y auditoría.',
+              );
+            }
+            return ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: ScrollToTopArea(
+                padding: const EdgeInsets.all(8),
+                builder: (context, controller) => PomgtListView(
+                  controller: controller,
+                  shrinkWrap: true,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'Marca uno o varios operadores. El botón de estrella señala al responsable de la orden.',
+                        style: TextStyle(
+                          color: PomgtColors.muted,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ),
+                    for (final operator in operators)
+                      _OperatorSelectRow(
+                        name: operator['full_name']?.toString() ?? 'Operador',
+                        role:
+                            roleNames[operator['role_id']?.toString()] ??
+                            operator['email']?.toString(),
+                        selected: _selected.contains(operator['id'].toString()),
+                        isLead: _leadId == operator['id'].toString(),
+                        onToggle: () => setState(() {
+                          final id = operator['id'].toString();
+                          if (_selected.contains(id)) {
+                            _selected.remove(id);
+                            if (_leadId == id) _leadId = null;
+                          } else {
+                            _selected.add(id);
+                          }
+                        }),
+                        onSetLead: () => setState(() {
+                          final id = operator['id'].toString();
+                          if (!_selected.contains(id)) _selected.add(id);
+                          _leadId = _leadId == id ? null : id;
+                        }),
                       ),
                   ],
                 ),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: PomgtColors.canvas,
+                  ),
+                )
+              : const Text('Guardar'),
         ),
       ],
     );
   }
+}
+
+class _OperatorSelectRow extends StatelessWidget {
+  const _OperatorSelectRow({
+    required this.name,
+    required this.role,
+    required this.selected,
+    required this.isLead,
+    required this.onToggle,
+    required this.onSetLead,
+  });
+  final String name;
+  final String? role;
+  final bool selected;
+  final bool isLead;
+  final VoidCallback onToggle;
+  final VoidCallback onSetLead;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onToggle,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Checkbox(value: selected, onChanged: (_) => onToggle()),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: PomgtColors.ink,
+                  ),
+                ),
+                if (role != null && role!.trim().isNotEmpty)
+                  Text(
+                    role!,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: PomgtColors.muted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: isLead ? 'Responsable de la orden' : 'Marcar responsable',
+            visualDensity: VisualDensity.compact,
+            onPressed: selected ? onSetLead : null,
+            icon: Icon(
+              isLead ? LucideIcons.star : LucideIcons.star,
+              size: 18,
+              color: isLead ? PomgtColors.amber : PomgtColors.subtle,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Panel extends StatelessWidget {
@@ -2353,7 +3822,7 @@ class _Panel extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 15,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -2412,7 +3881,7 @@ class _InfoGrid extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -2457,7 +3926,7 @@ class _MiniMetric extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.ink,
             fontSize: 12,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
@@ -2470,27 +3939,30 @@ class _StatusText extends StatelessWidget {
   final String status;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 7,
-        height: 7,
-        decoration: BoxDecoration(
-          color: _statusColor(status),
-          shape: BoxShape.circle,
+  Widget build(BuildContext context) => PomgtAnimatedValue(
+    value: status,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: _statusColor(status),
+            shape: BoxShape.circle,
+          ),
         ),
-      ),
-      const SizedBox(width: 7),
-      Text(
-        UiCopy.enumLabel(status),
-        style: const TextStyle(
-          color: PomgtColors.ink,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
+        const SizedBox(width: 7),
+        Text(
+          UiCopy.enumLabel(status),
+          style: const TextStyle(
+            color: PomgtColors.ink,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
@@ -2532,7 +4004,7 @@ class _TimelineRow extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.ink,
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               if (subtitle.trim().isNotEmpty) ...[
@@ -2597,7 +4069,7 @@ class _TableHeader extends StatelessWidget {
               style: const TextStyle(
                 color: PomgtColors.muted,
                 fontSize: 10.5,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -2649,7 +4121,7 @@ class _MaterialRow extends StatelessWidget {
                 style: TextStyle(
                   color: i == 0 ? PomgtColors.ink : PomgtColors.secondaryInk,
                   fontSize: 11.5,
-                  fontWeight: i == 0 ? FontWeight.w800 : FontWeight.w600,
+                  fontWeight: i == 0 ? FontWeight.w600 : FontWeight.w600,
                 ),
               ),
             ),
@@ -2700,7 +4172,7 @@ class _QualityRow extends StatelessWidget {
                 Text(
                   row['name']?.toString() ?? 'Control',
                   style: const TextStyle(
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     fontSize: 12.5,
                   ),
                 ),
@@ -2760,8 +4232,8 @@ class _ChecklistRow extends StatelessWidget {
       children: [
         Icon(
           row['is_completed'] == true
-              ? CupertinoIcons.check_mark_circled_solid
-              : CupertinoIcons.circle,
+              ? LucideIcons.circleCheck
+              : LucideIcons.circle,
           size: 17,
           color: row['is_completed'] == true
               ? PomgtColors.success
@@ -2775,7 +4247,7 @@ class _ChecklistRow extends StatelessWidget {
               Text(
                 row['prompt']?.toString() ?? 'Verificación',
                 style: const TextStyle(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                   fontSize: 12.5,
                 ),
               ),
@@ -2826,7 +4298,7 @@ class _CostLine extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontSize: 12.5,
-                    fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                    fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
               ),
@@ -2834,14 +4306,14 @@ class _CostLine extends StatelessWidget {
                 'Est: $currency \$${_n(estimated).toStringAsFixed(2)}',
                 style: TextStyle(
                   color: PomgtColors.secondaryInk,
-                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                  fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
               Text(
                 'Real: $currency \$${_n(actual).toStringAsFixed(2)}',
                 style: TextStyle(
                   color: PomgtColors.ink,
-                  fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+                  fontWeight: strong ? FontWeight.w700 : FontWeight.w600,
                 ),
               ),
             ],
@@ -2854,7 +4326,7 @@ class _CostLine extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                  fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
             ),
@@ -2865,7 +4337,7 @@ class _CostLine extends StatelessWidget {
                 textAlign: TextAlign.right,
                 style: TextStyle(
                   color: PomgtColors.secondaryInk,
-                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                  fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
             ),
@@ -2877,7 +4349,7 @@ class _CostLine extends StatelessWidget {
                 textAlign: TextAlign.right,
                 style: TextStyle(
                   color: PomgtColors.ink,
-                  fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+                  fontWeight: strong ? FontWeight.w700 : FontWeight.w600,
                 ),
               ),
             ),
@@ -2912,7 +4384,7 @@ class _MetricPanel extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.muted,
             fontSize: 11,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 8),
@@ -2921,7 +4393,7 @@ class _MetricPanel extends StatelessWidget {
           style: const TextStyle(
             color: PomgtColors.ink,
             fontSize: 22,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 4),
@@ -2959,6 +4431,10 @@ class _CreateProductionOrderDialogState
   bool loadingRelations = false;
   List<Map<String, dynamic>> boms = const [];
   List<Map<String, dynamic>> routes = const [];
+  String? relationsError;
+  String? bomHint;
+  String? routeHint;
+  bool routeFromCategory = false;
   List<Map<String, dynamic>> availableUnits = const [];
   late Future<List<List<Map<String, dynamic>>>> future;
 
@@ -2969,6 +4445,7 @@ class _CreateProductionOrderDialogState
     future = Future.wait([
       lookups.rows('products', refresh: true),
       lookups.rows('units_of_measure'),
+      lookups.rows('product_categories'),
     ]);
   }
 
@@ -2983,6 +4460,7 @@ class _CreateProductionOrderDialogState
     String? id,
     List<Map<String, dynamic>> products,
   ) async {
+    Map<String, dynamic>? selectedProduct;
     setState(() {
       productId = id;
       bomRevisionId = null;
@@ -2990,12 +4468,18 @@ class _CreateProductionOrderDialogState
       boms = const [];
       routes = const [];
       loadingRelations = id != null;
+      relationsError = null;
+      bomHint = null;
+      routeHint = null;
+      routeFromCategory = false;
       if (id != null) {
         final selected = products
             .where((e) => e['id']?.toString() == id)
             .toList();
-        if (selected.isNotEmpty)
+        if (selected.isNotEmpty) {
+          selectedProduct = selected.first;
           uomId = selected.first['base_uom_id']?.toString();
+        }
       }
     });
     if (id == null) return;
@@ -3005,19 +4489,36 @@ class _CreateProductionOrderDialogState
         Phase1Schema.tables['boms']!,
         filters: {'product_id': id},
       );
-      final routeHeads = await generic.listRows(
+      var routeHeads = await generic.listRows(
         Phase1Schema.tables['routings']!,
         filters: {'product_id': id},
       );
+      var routeHeadsFromCategory = false;
+      final categoryId = selectedProduct?['category_id']?.toString();
+      if (routeHeads.isEmpty && categoryId != null && categoryId.isNotEmpty) {
+        routeHeads = await generic.listRows(
+          Phase1Schema.tables['routings']!,
+          filters: {'category_id': categoryId},
+        );
+        routeHeadsFromCategory = routeHeads.isNotEmpty;
+      }
       final bomRows = <Map<String, dynamic>>[];
       final routeRows = <Map<String, dynamic>>[];
+      final inactiveBoms = <String>[];
+      final inactiveRoutes = <String>[];
       for (final head in bomHeads) {
         final revs = await generic.listRows(
           Phase1Schema.tables['bom_revisions']!,
           filters: {'bom_id': head['id']},
         );
-        for (final rev in revs.where((e) => e['status'] == 'active')) {
-          bomRows.add({...rev, '_head': head});
+        for (final rev in revs) {
+          if (rev['status'] == 'active') {
+            bomRows.add({...rev, '_head': head});
+          } else {
+            inactiveBoms.add(
+              '${head['bom_code']} ${rev['revision_code']} (${UiCopy.enumLabel(rev['status']?.toString() ?? '')})',
+            );
+          }
         }
       }
       for (final head in routeHeads) {
@@ -3025,14 +4526,35 @@ class _CreateProductionOrderDialogState
           Phase1Schema.tables['routing_revisions']!,
           filters: {'routing_id': head['id']},
         );
-        for (final rev in revs.where((e) => e['status'] == 'active')) {
-          routeRows.add({...rev, '_head': head});
+        for (final rev in revs) {
+          if (rev['status'] == 'active') {
+            routeRows.add({...rev, '_head': head});
+          } else {
+            inactiveRoutes.add(
+              '${head['routing_code']} ${rev['revision_code']} (${UiCopy.enumLabel(rev['status']?.toString() ?? '')})',
+            );
+          }
         }
       }
       if (!mounted) return;
       setState(() {
         boms = bomRows;
         routes = routeRows;
+        routeFromCategory = routeHeadsFromCategory && routeRows.isNotEmpty;
+        bomHint = bomRows.isEmpty
+            ? (inactiveBoms.isNotEmpty
+                  ? 'La estructura existe, pero su versión no está Activa: ${inactiveBoms.join(', ')}. Activa la versión en Estructuras de fabricación → Versiones.'
+                  : (bomHeads.isEmpty
+                        ? 'Este producto no tiene ninguna estructura de fabricación.'
+                        : 'La estructura no tiene versiones.'))
+            : null;
+        routeHint = routeRows.isEmpty
+            ? (inactiveRoutes.isNotEmpty
+                  ? 'La ruta existe, pero su versión no está Activa: ${inactiveRoutes.join(', ')}. Activa la versión en Rutas de fabricación → Versiones.'
+                  : (routeHeads.isEmpty
+                        ? 'Este producto no tiene ninguna ruta de fabricación.'
+                        : 'La ruta no tiene versiones.'))
+            : null;
         final defaultBom = bomRows
             .where((e) => _map(e['_head'])['is_default'] == true)
             .toList();
@@ -3056,8 +4578,14 @@ class _CreateProductionOrderDialogState
                 ?.toString();
         loadingRelations = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => loadingRelations = false);
+      await _syncBomWithRoute(routingRevisionId);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          loadingRelations = false;
+          relationsError = e.toString();
+        });
+      }
     }
   }
 
@@ -3071,6 +4599,49 @@ class _CreateProductionOrderDialogState
 
   String? _selectedBomUomId() =>
       _selectedBomRevision()?['output_uom_id']?.toString();
+
+  /// The route's steps consume components of one BOM version; that version is
+  /// the structure this production order must follow.
+  Future<String?> _bomFromRoute(String? routeRevisionId) async {
+    if (routeRevisionId == null) return null;
+    final generic = context.read<GenericRepository>();
+    final validIds = {for (final b in boms) b['id']?.toString()};
+    try {
+      final ops = await generic.listRows(
+        Phase1Schema.tables['routing_operations']!,
+        filters: {'routing_revision_id': routeRevisionId},
+      );
+      for (final op in ops) {
+        final materials = await generic.listRows(
+          Phase1Schema.tables['routing_operation_materials']!,
+          filters: {'routing_operation_id': op['id']},
+        );
+        for (final material in materials) {
+          final itemId = material['bom_item_id'];
+          if (itemId == null) continue;
+          final items = await generic.listRows(
+            Phase1Schema.tables['bom_items']!,
+            filters: {'id': itemId},
+          );
+          final bomRevision = items.isEmpty
+              ? null
+              : items.first['bom_revision_id']?.toString();
+          if (bomRevision != null && validIds.contains(bomRevision)) {
+            return bomRevision;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _syncBomWithRoute(String? routeRevisionId) async {
+    final derived = await _bomFromRoute(routeRevisionId);
+    if (!mounted || derived == null || routingRevisionId != routeRevisionId) {
+      return;
+    }
+    _selectBomRevision(derived);
+  }
 
   void _selectBomRevision(String? value) {
     setState(() {
@@ -3090,31 +4661,36 @@ class _CreateProductionOrderDialogState
   String? _preparationError(List<Map<String, dynamic>> units) {
     if (!prepareAutomatically) return null;
     if (boms.isEmpty) {
-      return 'No hay una lista de materiales activa para preparar la OP. Crea o activa una BOM, o guarda la OP como borrador.';
+      return 'No hay una estructura de fabricación activa para preparar la OP. Crea o activa una estructura de fabricación, o guarda la OP como borrador.';
     }
     if (routes.isEmpty) {
       return 'No hay una ruta de fabricación activa para preparar la OP. Crea o activa una ruta, o guarda la OP como borrador.';
     }
-    if (bomRevisionId == null) return 'Selecciona una lista de materiales.';
+    if (bomRevisionId == null)
+      return 'Selecciona una estructura de fabricación.';
     if (routingRevisionId == null) return 'Selecciona una ruta de fabricación.';
     final bomUomId = _selectedBomUomId();
     if (bomUomId != null && uomId != bomUomId) {
-      return 'La unidad de la OP debe coincidir con la unidad de salida de la BOM seleccionada: ${_unitName(units, bomUomId)}.';
+      return 'La unidad de la OP debe coincidir con la unidad de salida de la estructura de fabricación seleccionada: ${_unitName(units, bomUomId)}.';
     }
     return null;
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Row(
+    title: Row(
       children: [
-        Icon(
-          Icons.precision_manufacturing_outlined,
-          size: 22,
-          color: PomgtColors.blue,
+        const Icon(LucideIcons.factory, size: 22, color: PomgtColors.ink),
+        const SizedBox(width: 10),
+        const Expanded(child: Text('Nueva orden de producción')),
+        IconButton(
+          tooltip: 'Cerrar',
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(LucideIcons.x, size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          visualDensity: VisualDensity.compact,
         ),
-        SizedBox(width: 10),
-        Expanded(child: Text('Nueva orden de producción')),
       ],
     ),
     content: SizedBox(
@@ -3123,10 +4699,7 @@ class _CreateProductionOrderDialogState
         future: future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SizedBox(
-              height: 300,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            );
+            return const SizedBox(height: 300, child: PomgtLoading());
           }
           final products =
               (snapshot.data?.first ?? const <Map<String, dynamic>>[])
@@ -3140,281 +4713,296 @@ class _CreateProductionOrderDialogState
               ? snapshot.data![1]
               : <Map<String, dynamic>>[];
           availableUnits = units;
+          final categoryNames = {
+            for (final c
+                in snapshot.data != null && snapshot.data!.length > 2
+                    ? snapshot.data![2]
+                    : const <Map<String, dynamic>>[])
+              c['id'].toString(): (c['name'] ?? '').toString(),
+          };
           final bomUomId = _selectedBomUomId();
           return Form(
             key: form,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'La OP puede crearse manualmente para producción interna, inventario, muestras, retrabajos o pruebas. POMGT congelará la BOM y la ruta al prepararla.',
-                    style: TextStyle(color: PomgtColors.muted, fontSize: 12.5),
-                  ),
-                  const SizedBox(height: 18),
-                  DropdownButtonFormField<String>(
-                    initialValue: productId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Producto a fabricar *',
-                    ),
-                    items: products
-                        .map(
-                          (p) => DropdownMenuItem(
-                            value: p['id'].toString(),
-                            child: Text('${p['sku']} · ${p['name']}'),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) => selectProduct(value, products),
-                    validator: (v) =>
-                        v == null ? 'Selecciona un producto.' : null,
-                  ),
-                  if (products.isEmpty) ...[
-                    const SizedBox(height: 8),
+            child: ScrollToTopArea(
+              padding: const EdgeInsets.all(12),
+              builder: (context, controller) => SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                     const Text(
-                      'No existen productos activos marcados como fabricables. Crea o edita un producto antes de generar la OP.',
+                      'La OP puede crearse manualmente para producción interna, inventario, muestras, retrabajos o pruebas. POMGT congelará la estructura de fabricación y la ruta al prepararla.',
                       style: TextStyle(
-                        color: PomgtColors.warning,
-                        fontSize: 12,
+                        color: PomgtColors.muted,
+                        fontSize: 12.5,
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: quantity,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
+                    const SizedBox(height: 18),
+                    CategorizedSearchPicker(
+                      label: 'Producto a fabricar *',
+                      hint: 'Buscar por SKU, nombre o categoría…',
+                      value: productId,
+                      items: [
+                        for (final p in products)
+                          PickerItem(
+                            id: p['id'].toString(),
+                            label: '${p['sku']} · ${p['name']}',
+                            category:
+                                categoryNames[p['category_id']?.toString()] ??
+                                'Sin categoría',
                           ),
-                          decoration: const InputDecoration(
-                            labelText: 'Cantidad planificada *',
-                          ),
-                          validator: (value) => (_n(value) <= 0)
-                              ? 'Captura una cantidad mayor a cero.'
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey('op-uom-${uomId ?? ''}'),
-                          initialValue: uomId,
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: 'Unidad de medida *',
-                            helperText: bomUomId == null
-                                ? null
-                                : 'Sincronizada con la unidad de salida de la BOM.',
-                          ),
-                          items: units
-                              .map(
-                                (u) => DropdownMenuItem(
-                                  value: u['id'].toString(),
-                                  child: Text('${u['name']} (${u['symbol']})'),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: bomUomId == null
-                              ? (value) => setState(() => uomId = value)
-                              : null,
-                          validator: (v) {
-                            if (v == null) return 'Selecciona una unidad.';
-                            if (prepareAutomatically &&
-                                bomUomId != null &&
-                                v != bomUomId) {
-                              return 'Debe coincidir con la unidad de salida de la BOM.';
-                            }
-                            return null;
-                          },
+                      ],
+                      onChanged: (value) => selectProduct(value, products),
+                      validator: (v) =>
+                          v == null ? 'Selecciona un producto.' : null,
+                    ),
+                    if (products.isEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'No existen productos activos marcados como fabricables. Crea o edita un producto antes de generar la OP.',
+                        style: TextStyle(
+                          color: PomgtColors.warning,
+                          fontSize: 12,
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: sourceType,
-                          decoration: const InputDecoration(
-                            labelText: 'Origen de producción',
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'internal',
-                              child: Text('Orden interna'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'stock_replenishment',
-                              child: Text('Reposición de inventario'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'make_to_stock',
-                              child: Text('Producción para inventario'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'sample',
-                              child: Text('Muestra'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'rework',
-                              child: Text('Retrabajo'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'test',
-                              child: Text('Prueba'),
-                            ),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => sourceType = value ?? 'internal'),
-                        ),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: priority,
-                          decoration: const InputDecoration(
-                            labelText: 'Prioridad',
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'low', child: Text('Baja')),
-                            DropdownMenuItem(
-                              value: 'normal',
-                              child: Text('Normal'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'high',
-                              child: Text('Alta'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'urgent',
-                              child: Text('Urgente'),
-                            ),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => priority = value ?? 'normal'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (loadingRelations)
-                    const LinearProgressIndicator(minHeight: 2),
-                  if (productId != null && !loadingRelations) ...[
+                    const SizedBox(height: 14),
                     Row(
                       children: [
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            key: ValueKey('op-bom-${bomRevisionId ?? ''}'),
-                            initialValue: bomRevisionId,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Lista de materiales activa',
+                          child: TextFormField(
+                            errorBuilder: pomgtValidationMessage,
+                            controller: quantity,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
                             ),
-                            items: boms.map((r) {
-                              final head = _map(r['_head']);
-                              return DropdownMenuItem(
-                                value: r['id'].toString(),
-                                child: Text(
-                                  '${head['bom_code']} · ${r['revision_code']} · ${head['name']}',
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: _selectBomRevision,
+                            inputFormatters: const [
+                              ThousandsInputFormatter(allowNegative: false),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Cantidad planificada *',
+                              hintText: 'Ej. 100',
+                            ),
+                            validator: (value) => (_n(value) <= 0)
+                                ? 'Captura una cantidad mayor a cero.'
+                                : null,
                           ),
                         ),
                         const SizedBox(width: 18),
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: routingRevisionId,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Ruta de fabricación activa',
-                            ),
-                            items: routes.map((r) {
-                              final head = _map(r['_head']);
-                              return DropdownMenuItem(
-                                value: r['id'].toString(),
-                                child: Text(
-                                  '${head['routing_code']} · ${r['revision_code']} · ${head['name']}',
+                          child: CategorizedSearchPicker(
+                            key: ValueKey('op-uom-${uomId ?? ''}'),
+                            label: 'Unidad de medida *',
+                            hint: 'Buscar unidad…',
+                            helperText: bomUomId == null ? null : 'Sincronizada con la unidad de salida de la estructura de fabricación.',
+                            value: uomId,
+                            enabled: bomUomId == null,
+                            items: [
+                              for (final u in units)
+                                PickerItem(
+                                  id: u['id'].toString(),
+                                  label: '${u['name']} (${u['symbol']})',
+                                  category: 'Unidades',
                                 ),
-                              );
-                            }).toList(),
-                            onChanged: (value) =>
-                                setState(() => routingRevisionId = value),
+                            ],
+                            onChanged: bomUomId == null
+                                ? (value) => setState(() => uomId = value)
+                                : (_) {},
+                            validator: (v) {
+                              if (v == null) return 'Selecciona una unidad.';
+                              if (prepareAutomatically &&
+                                  bomUomId != null &&
+                                  v != bomUomId) {
+                                return 'Debe coincidir con la unidad de salida de la estructura de fabricación.';
+                              }
+                              return null;
+                            },
                           ),
                         ),
                       ],
                     ),
-                    if (boms.isEmpty || routes.isEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '${boms.isEmpty ? 'Falta una lista de materiales activa. ' : ''}${routes.isEmpty ? 'Falta una ruta de fabricación activa.' : ''} Puedes guardar la OP como borrador, pero no podrá prepararse hasta completar la configuración del producto.',
-                        style: const TextStyle(
-                          color: PomgtColors.warning,
-                          fontSize: 11.5,
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            errorBuilder: pomgtValidationMessage,
+                            initialValue: sourceType,
+                            decoration: const InputDecoration(
+                              labelText: 'Origen de producción',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'internal',
+                                child: Text('Orden interna'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'stock_replenishment',
+                                child: Text('Reposición de inventario'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'make_to_stock',
+                                child: Text('Producción para inventario'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'sample',
+                                child: Text('Muestra'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'rework',
+                                child: Text('Retrabajo'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'test',
+                                child: Text('Prueba'),
+                              ),
+                            ],
+                            onChanged: (value) => setState(
+                              () => sourceType = value ?? 'internal',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: CategorizedSearchPicker(
+                            label: 'Prioridad',
+                            hint: 'Buscar prioridad…',
+                            value: priority,
+                            items: [
+                              for (final v in [
+                                'low',
+                                'normal',
+                                'high',
+                                'urgent',
+                              ])
+                                PickerItem(
+                                  id: v,
+                                  label: UiCopy.enumLabel(v),
+                                  category: 'Prioridades',
+                                ),
+                            ],
+                            onChanged: (value) =>
+                                setState(() => priority = value ?? 'normal'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (loadingRelations)
+                      const PomgtProgressIndicator(minHeight: 2),
+                    if (productId != null && !loadingRelations) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: CategorizedSearchPicker(
+                              label: 'Ruta de fabricación activa',
+                              hint: 'Buscar ruta…',
+                              value: routingRevisionId,
+                              items: [
+                                for (final r in routes)
+                                  PickerItem(
+                                    id: r['id'].toString(),
+                                    label:
+                                        '${_map(r['_head'])['routing_code']} · ${r['revision_code']} · ${_map(r['_head'])['name']}',
+                                    category: 'Rutas',
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                setState(() => routingRevisionId = value);
+                                _syncBomWithRoute(value);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (routeFromCategory) ...[
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Este producto no tiene una ruta propia: se está usando la ruta predeterminada de su categoría.',
+                          style: TextStyle(
+                            color: PomgtColors.muted,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                      if (relationsError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'No se pudieron cargar las estructuras de fabricación y rutas: $relationsError',
+                          style: const TextStyle(
+                            color: PomgtColors.danger,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ] else if (boms.isEmpty || routes.isEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '${[if (bomHint != null) bomHint, if (routeHint != null) routeHint].join(' ')} Puedes guardar la OP como borrador, pero no podrá prepararse hasta completar la configuración del producto.',
+                          style: const TextStyle(
+                            color: PomgtColors.warning,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DateField(
+                            label: 'Inicio planificado',
+                            value: plannedStartAt,
+                            onChanged: (d) =>
+                                setState(() => plannedStartAt = d),
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: _DateField(
+                            label: 'Fin planificado',
+                            value: plannedEndAt,
+                            onChanged: (d) => setState(() => plannedEndAt = d),
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: _DateField(
+                            label: 'Fecha requerida',
+                            value: requiredAt,
+                            onChanged: (d) => setState(() => requiredAt = d),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: notes,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'Notas de producción',
+                        hintText: 'Indicaciones para el equipo de piso…',
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Preparar automáticamente al crear',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
                         ),
                       ),
-                    ],
+                      subtitle: const Text(
+                        'Congela estructura de fabricación, ruta, operaciones, calidad y checklists. Si falta configuración, la creación mostrará el motivo exacto.',
+                      ),
+                      value: prepareAutomatically,
+                      onChanged: (value) =>
+                          setState(() => prepareAutomatically = value),
+                    ),
                   ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _DateField(
-                          label: 'Inicio planificado',
-                          value: plannedStartAt,
-                          onChanged: (d) => setState(() => plannedStartAt = d),
-                        ),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: _DateField(
-                          label: 'Fin planificado',
-                          value: plannedEndAt,
-                          onChanged: (d) => setState(() => plannedEndAt = d),
-                        ),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: _DateField(
-                          label: 'Fecha requerida',
-                          value: requiredAt,
-                          onChanged: (d) => setState(() => requiredAt = d),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: notes,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Notas de producción',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Preparar automáticamente al crear',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                      ),
-                    ),
-                    subtitle: const Text(
-                      'Congela lista de materiales, ruta, operaciones, calidad y checklists. Si falta configuración, la creación mostrará el motivo exacto.',
-                    ),
-                    value: prepareAutomatically,
-                    onChanged: (value) =>
-                        setState(() => prepareAutomatically = value),
-                  ),
-                ],
+                ),
               ),
             ),
           );
@@ -3426,7 +5014,8 @@ class _CreateProductionOrderDialogState
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancelar'),
       ),
-      FilledButton(
+      FilledButton.icon(
+        icon: const Icon(LucideIcons.plus, size: 16),
         onPressed: () {
           if (!(form.currentState?.validate() ?? false) ||
               productId == null ||
@@ -3472,7 +5061,7 @@ class _CreateProductionOrderDialogState
             ),
           );
         },
-        child: Text(
+        label: Text(
           prepareAutomatically ? 'Crear y preparar OP' : 'Crear borrador',
         ),
       ),
@@ -3507,6 +5096,572 @@ class _CreateProductionRequest {
   final DateTime? plannedEndAt;
   final String? notes;
   final bool prepareAutomatically;
+}
+
+class _CreateMultiProductionItem {
+  const _CreateMultiProductionItem({
+    required this.productId,
+    required this.label,
+    required this.quantity,
+    required this.uomId,
+  });
+  final String productId;
+  final String label;
+  final double quantity;
+  final String? uomId;
+}
+
+class _CreateMultiProductionRequest {
+  const _CreateMultiProductionRequest({
+    required this.items,
+    required this.priority,
+    required this.sourceType,
+    required this.requiredAt,
+    required this.plannedStartAt,
+    required this.plannedEndAt,
+    required this.notes,
+    required this.prepareAutomatically,
+  });
+  final List<_CreateMultiProductionItem> items;
+  final String priority;
+  final String sourceType;
+  final DateTime? requiredAt;
+  final DateTime? plannedStartAt;
+  final DateTime? plannedEndAt;
+  final String? notes;
+  final bool prepareAutomatically;
+}
+
+enum _MultiCreateStatus { prepared, createdNotPrepared, createdDraft, failed }
+
+class _MultiCreateOutcome {
+  const _MultiCreateOutcome(
+    this.label,
+    this.status, {
+    this.opNumber,
+    this.error,
+  });
+  final String label;
+  final _MultiCreateStatus status;
+  final String? opNumber;
+  final String? error;
+}
+
+class _MultiCreateResultsDialog extends StatelessWidget {
+  const _MultiCreateResultsDialog({required this.outcomes});
+  final List<_MultiCreateOutcome> outcomes;
+
+  @override
+  Widget build(BuildContext context) {
+    final preparedCount = outcomes
+        .where((o) => o.status == _MultiCreateStatus.prepared)
+        .length;
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(LucideIcons.layers, size: 21, color: PomgtColors.ink),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$preparedCount de ${outcomes.length} órdenes preparadas',
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(LucideIcons.x, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 480,
+        child: ScrollToTopArea(
+          padding: const EdgeInsets.all(12),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final outcome in outcomes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          switch (outcome.status) {
+                            _MultiCreateStatus.prepared =>
+                              LucideIcons.circleCheck,
+                            _MultiCreateStatus.createdDraft => LucideIcons.file,
+                            _MultiCreateStatus.createdNotPrepared =>
+                              LucideIcons.triangleAlert,
+                            _MultiCreateStatus.failed => LucideIcons.circleX,
+                          },
+                          size: 18,
+                          color: switch (outcome.status) {
+                            _MultiCreateStatus.prepared => PomgtColors.success,
+                            _MultiCreateStatus.createdDraft =>
+                              PomgtColors.muted,
+                            _MultiCreateStatus.createdNotPrepared =>
+                              PomgtColors.warning,
+                            _MultiCreateStatus.failed => PomgtColors.danger,
+                          },
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                outcome.label,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Text(
+                                switch (outcome.status) {
+                                  _MultiCreateStatus.prepared =>
+                                    'OP ${outcome.opNumber} preparada.',
+                                  _MultiCreateStatus.createdDraft =>
+                                    'OP ${outcome.opNumber} creada en borrador.',
+                                  _MultiCreateStatus.createdNotPrepared =>
+                                    'OP ${outcome.opNumber} creada, pero no se pudo preparar: ${outcome.error}',
+                                  _MultiCreateStatus.failed =>
+                                    'No se pudo crear: ${outcome.error}',
+                                },
+                                style: const TextStyle(
+                                  color: PomgtColors.muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cerrar'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreateMultiProductionOrderDialog extends StatefulWidget {
+  const _CreateMultiProductionOrderDialog();
+  @override
+  State<_CreateMultiProductionOrderDialog> createState() =>
+      _CreateMultiProductionOrderDialogState();
+}
+
+class _CreateMultiProductionOrderDialogState
+    extends State<_CreateMultiProductionOrderDialog> {
+  final form = GlobalKey<FormState>();
+  final notes = TextEditingController();
+  String priority = 'normal';
+  String sourceType = 'internal';
+  DateTime? requiredAt;
+  DateTime? plannedStartAt;
+  DateTime? plannedEndAt;
+  bool prepareAutomatically = true;
+  final List<String> _selectedProductOrder = [];
+  final Set<String> _selectedProductIds = {};
+  final Map<String, TextEditingController> _qtyControllers = {};
+  String? _lineError;
+  List<Map<String, dynamic>> _products = const [];
+  List<Map<String, dynamic>> _boms = const [];
+  List<Map<String, dynamic>> _bomRevisions = const [];
+  late Future<List<List<Map<String, dynamic>>>> future;
+
+  @override
+  void initState() {
+    super.initState();
+    future = _load();
+  }
+
+  Future<List<List<Map<String, dynamic>>>> _load() async {
+    final lookups = context.read<LookupRepository>();
+    final data = await Future.wait([
+      lookups.rows('products', refresh: true),
+      lookups.rows('units_of_measure'),
+      lookups.rows('product_categories'),
+      lookups.rows('boms'),
+      lookups.rows('bom_revisions'),
+    ]);
+    _products = data[0]
+        .where((e) => e['is_manufacturable'] == true && e['is_active'] != false)
+        .toList();
+    _boms = data[3];
+    _bomRevisions = data[4];
+    return data;
+  }
+
+  @override
+  void dispose() {
+    notes.dispose();
+    for (final c in _qtyControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _toggleProduct(String productId) {
+    setState(() {
+      if (_selectedProductIds.remove(productId)) {
+        _selectedProductOrder.remove(productId);
+        _qtyControllers.remove(productId)?.dispose();
+      } else {
+        _selectedProductIds.add(productId);
+        _selectedProductOrder.add(productId);
+        _qtyControllers[productId] = TextEditingController(text: '1');
+      }
+      _lineError = null;
+    });
+  }
+
+  Future<void> _linkBom(Map<String, dynamic> product) async {
+    final created = await showPomgtDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => LinkBomDialog(product: product, activateRevision: true),
+    );
+    if (created != true || !mounted) return;
+    final lookups = context.read<LookupRepository>();
+    _boms = await lookups.rows('boms', refresh: true);
+    _bomRevisions = await lookups.rows('bom_revisions', refresh: true);
+    if (mounted) setState(() {});
+  }
+
+  bool _validate() {
+    if (!(form.currentState?.validate() ?? false)) return false;
+    if (_selectedProductIds.isEmpty) {
+      setState(
+        () => _lineError = 'Agrega al menos un producto con su cantidad.',
+      );
+      return false;
+    }
+    for (final id in _selectedProductIds) {
+      final qty = parseNumberText(_qtyControllers[id]?.text);
+      if (qty == null || qty <= 0) {
+        setState(
+          () => _lineError = 'Captura una cantidad válida para cada producto.',
+        );
+        return false;
+      }
+    }
+    setState(() => _lineError = null);
+    return true;
+  }
+
+  List<_CreateMultiProductionItem> _buildItems() => [
+    for (final id in _selectedProductOrder)
+      () {
+        final product = _products.firstWhere(
+          (p) => p['id'].toString() == id,
+          orElse: () => const {},
+        );
+        return _CreateMultiProductionItem(
+          productId: id,
+          label: '${product['sku'] ?? '—'} · ${product['name'] ?? 'Producto'}',
+          quantity: (parseNumberText(_qtyControllers[id]?.text) ?? 0)
+              .toDouble(),
+          uomId: product['base_uom_id']?.toString(),
+        );
+      }(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(LucideIcons.layers, size: 22, color: PomgtColors.ink),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Nueva orden de producción múltiple')),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(LucideIcons.x, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: _responsiveDialogWidth(context, 760),
+        child: FutureBuilder<List<List<Map<String, dynamic>>>>(
+          future: future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox(height: 300, child: PomgtLoading());
+            }
+            final products = _products;
+            final categories =
+                snapshot.data != null && snapshot.data!.length > 2
+                ? snapshot.data![2]
+                : const <Map<String, dynamic>>[];
+            final categoryNames = {
+              for (final c in categories)
+                c['id'].toString(): (c['name'] ?? '').toString(),
+            };
+            final missingBomProductIds = productIdsMissingActiveBom(
+              _selectedProductOrder,
+              boms: _boms,
+              bomRevisions: _bomRevisions,
+            );
+            return Form(
+              key: form,
+              child: ScrollToTopArea(
+                padding: const EdgeInsets.all(12),
+                builder: (context, controller) => SingleChildScrollView(
+                  controller: controller,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Selecciona varios productos para generar una orden de producción por cada uno, con una fecha y prioridad compartidas. La estructura de fabricación y la ruta de cada producto se resuelven automáticamente al preparar la OP.',
+                        style: TextStyle(
+                          color: PomgtColors.muted,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      MultiCategorizedPicker(
+                        label: 'Buscar producto',
+                        hint: 'Escribe el SKU o el nombre…',
+                        items: [
+                          for (final p in products)
+                            PickerItem(
+                              id: p['id'].toString(),
+                              label: '${p['sku']} · ${p['name']}',
+                              category:
+                                  categoryNames[p['category_id']?.toString()] ??
+                                  'Sin categoría',
+                            ),
+                        ],
+                        selectedIds: _selectedProductIds,
+                        onToggle: _toggleProduct,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Productos seleccionados (${_selectedProductOrder.length})',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 10),
+                      if (_selectedProductOrder.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 18),
+                          child: Text(
+                            'Todavía no has agregado productos.',
+                            style: TextStyle(color: PomgtColors.muted),
+                          ),
+                        )
+                      else
+                        Column(
+                          children: [
+                            for (final id in _selectedProductOrder)
+                              Builder(
+                                builder: (context) {
+                                  final product = products.firstWhere(
+                                    (p) => p['id'].toString() == id,
+                                    orElse: () => const {},
+                                  );
+                                  return SelectedProductRow(
+                                    product: product,
+                                    controller: _qtyControllers[id]!,
+                                    onRemove: () => _toggleProduct(id),
+                                    missingBom: missingBomProductIds.contains(
+                                      id,
+                                    ),
+                                    onLinkBom: () => _linkBom(product),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      if (_lineError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _lineError!,
+                          style: const TextStyle(
+                            color: PomgtColors.danger,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              errorBuilder: pomgtValidationMessage,
+                              initialValue: sourceType,
+                              decoration: const InputDecoration(
+                                labelText: 'Origen de producción',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'internal',
+                                  child: Text('Orden interna'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'stock_replenishment',
+                                  child: Text('Reposición de inventario'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'make_to_stock',
+                                  child: Text('Producción para inventario'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'sample',
+                                  child: Text('Muestra'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'rework',
+                                  child: Text('Retrabajo'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'test',
+                                  child: Text('Prueba'),
+                                ),
+                              ],
+                              onChanged: (value) => setState(
+                                () => sourceType = value ?? 'internal',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: CategorizedSearchPicker(
+                              label: 'Prioridad',
+                              hint: 'Buscar prioridad…',
+                              value: priority,
+                              items: [
+                                for (final v in [
+                                  'low',
+                                  'normal',
+                                  'high',
+                                  'urgent',
+                                ])
+                                  PickerItem(
+                                    id: v,
+                                    label: UiCopy.enumLabel(v),
+                                    category: 'Prioridades',
+                                  ),
+                              ],
+                              onChanged: (value) =>
+                                  setState(() => priority = value ?? 'normal'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _DateField(
+                              label: 'Inicio planificado',
+                              value: plannedStartAt,
+                              onChanged: (d) =>
+                                  setState(() => plannedStartAt = d),
+                            ),
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: _DateField(
+                              label: 'Fin planificado',
+                              value: plannedEndAt,
+                              onChanged: (d) =>
+                                  setState(() => plannedEndAt = d),
+                            ),
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: _DateField(
+                              label: 'Fecha requerida',
+                              value: requiredAt,
+                              onChanged: (d) => setState(() => requiredAt = d),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: notes,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Notas de producción',
+                          hintText: 'Indicaciones para el equipo de piso…',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                          'Preparar automáticamente al crear',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: const Text(
+                          'Cada OP se prepara con la estructura de fabricación y ruta activas del producto (o la de su categoría, si no tiene una propia). Si a algún producto le falta configuración, el resumen mostrará el motivo exacto sin afectar a los demás.',
+                        ),
+                        value: prepareAutomatically,
+                        onChanged: (value) =>
+                            setState(() => prepareAutomatically = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            if (!_validate()) return;
+            Navigator.pop(
+              context,
+              _CreateMultiProductionRequest(
+                items: _buildItems(),
+                priority: priority,
+                sourceType: sourceType,
+                requiredAt: requiredAt,
+                plannedStartAt: plannedStartAt,
+                plannedEndAt: plannedEndAt,
+                notes: notes.text.trim().isEmpty ? null : notes.text.trim(),
+                prepareAutomatically: prepareAutomatically,
+              ),
+            );
+          },
+          icon: const Icon(LucideIcons.plus, size: 16),
+          label: const Text('Crear órdenes'),
+        ),
+      ],
+    );
+  }
 }
 
 class _PlanningDialog extends StatefulWidget {
@@ -3544,77 +5699,95 @@ class _PlanningDialogState extends State<_PlanningDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Row(
+    title: Row(
       children: [
-        Icon(CupertinoIcons.calendar, color: PomgtColors.blue, size: 21),
-        SizedBox(width: 10),
-        Text('Planeación de la OP'),
+        const Icon(LucideIcons.calendar, color: PomgtColors.ink, size: 21),
+        const SizedBox(width: 10),
+        const Expanded(child: Text('Planeación de la OP')),
+        IconButton(
+          tooltip: 'Cerrar',
+          onPressed: saving ? null : () => Navigator.pop(context, false),
+          icon: const Icon(LucideIcons.x, size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          visualDensity: VisualDensity.compact,
+        ),
       ],
     ),
     content: SizedBox(
       width: _responsiveDialogWidth(context, 620),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final wide = constraints.maxWidth >= 600;
-                final fieldWidth = wide
-                    ? (constraints.maxWidth - 36) / 3
-                    : constraints.maxWidth;
-                return Wrap(
-                  spacing: 18,
-                  runSpacing: 14,
-                  children: [
-                    SizedBox(
-                      width: fieldWidth,
-                      child: _DateField(
-                        label: 'Inicio planificado',
-                        value: start,
-                        onChanged: (d) => setState(() => start = d),
+      child: ScrollToTopArea(
+        padding: const EdgeInsets.all(12),
+        builder: (context, controller) => SingleChildScrollView(
+          controller: controller,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 600;
+                  final fieldWidth = wide
+                      ? (constraints.maxWidth - 36) / 3
+                      : constraints.maxWidth;
+                  return Wrap(
+                    spacing: 18,
+                    runSpacing: 14,
+                    children: [
+                      SizedBox(
+                        width: fieldWidth,
+                        child: _DateField(
+                          label: 'Inicio planificado',
+                          value: start,
+                          onChanged: (d) => setState(() => start = d),
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: fieldWidth,
-                      child: _DateField(
-                        label: 'Fin planificado',
-                        value: end,
-                        onChanged: (d) => setState(() => end = d),
+                      SizedBox(
+                        width: fieldWidth,
+                        child: _DateField(
+                          label: 'Fin planificado',
+                          value: end,
+                          onChanged: (d) => setState(() => end = d),
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: fieldWidth,
-                      child: _DateField(
-                        label: 'Fecha requerida',
-                        value: required,
-                        onChanged: (d) => setState(() => required = d),
+                      SizedBox(
+                        width: fieldWidth,
+                        child: _DateField(
+                          label: 'Fecha requerida',
+                          value: required,
+                          onChanged: (d) => setState(() => required = d),
+                        ),
                       ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 15),
+              CategorizedSearchPicker(
+                label: 'Prioridad',
+                hint: 'Buscar prioridad…',
+                value: priority,
+                items: [
+                  for (final v in ['low', 'normal', 'high', 'urgent'])
+                    PickerItem(
+                      id: v,
+                      label: UiCopy.enumLabel(v),
+                      category: 'Prioridades',
                     ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 15),
-            DropdownButtonFormField<String>(
-              initialValue: priority,
-              decoration: const InputDecoration(labelText: 'Prioridad'),
-              items: const [
-                DropdownMenuItem(value: 'low', child: Text('Baja')),
-                DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                DropdownMenuItem(value: 'high', child: Text('Alta')),
-                DropdownMenuItem(value: 'urgent', child: Text('Urgente')),
-              ],
-              onChanged: (v) => setState(() => priority = v ?? 'normal'),
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: notes,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(labelText: 'Notas'),
-            ),
-          ],
+                ],
+                onChanged: (v) => setState(() => priority = v ?? 'normal'),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: notes,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Notas',
+                  hintText: 'Contexto administrativo…',
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -3673,24 +5846,18 @@ class _DateField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: () async {
-      final day = await showDatePicker(
-        context: context,
+      final day = await showPomgtDatePicker(
+        context,
         initialDate: value ?? DateTime.now(),
         firstDate: DateTime(2020),
         lastDate: DateTime(2100),
-        helpText: 'Selecciona una fecha',
-        cancelText: 'Cancelar',
-        confirmText: 'Aceptar',
       );
       if (day == null || !context.mounted) return;
-      final time = await showTimePicker(
-        context: context,
+      final time = await showPomgtTimePicker(
+        context,
         initialTime: value == null
             ? TimeOfDay.now()
             : TimeOfDay.fromDateTime(value!),
-        helpText: 'Selecciona una hora',
-        cancelText: 'Cancelar',
-        confirmText: 'Aceptar',
       );
       if (time == null) {
         onChanged(DateTime(day.year, day.month, day.day));
@@ -3703,7 +5870,7 @@ class _DateField extends StatelessWidget {
     child: InputDecorator(
       decoration: InputDecoration(
         labelText: label,
-        suffixIcon: const Icon(CupertinoIcons.calendar, size: 17),
+        suffixIcon: const Icon(LucideIcons.calendar, size: 17),
       ),
       child: Text(
         value == null ? 'Sin definir' : _dateTime(value!.toIso8601String()),
@@ -3714,125 +5881,6 @@ class _DateField extends StatelessWidget {
       ),
     ),
   );
-}
-
-class _CompleteOperationDialog extends StatefulWidget {
-  const _CompleteOperationDialog({required this.operation});
-  final Map<String, dynamic> operation;
-  @override
-  State<_CompleteOperationDialog> createState() =>
-      _CompleteOperationDialogState();
-}
-
-class _CompleteOperationDialogState extends State<_CompleteOperationDialog> {
-  late final TextEditingController completed;
-  final rejected = TextEditingController(text: '0');
-  final note = TextEditingController();
-  @override
-  void initState() {
-    super.initState();
-    completed = TextEditingController(
-      text: _fmt(widget.operation['planned_quantity']),
-    );
-  }
-
-  @override
-  void dispose() {
-    completed.dispose();
-    rejected.dispose();
-    note.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Completar operación'),
-    content: SizedBox(
-      width: _responsiveDialogWidth(context, 520),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              widget.operation['name']?.toString() ?? 'Operación',
-              style: const TextStyle(color: PomgtColors.muted),
-            ),
-            const SizedBox(height: 15),
-            Wrap(
-              spacing: 18,
-              runSpacing: 14,
-              children: [
-                SizedBox(
-                  width: _responsiveDialogWidth(context, 520) < 520
-                      ? double.infinity
-                      : 251,
-                  child: TextField(
-                    controller: completed,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Cantidad buena *',
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: _responsiveDialogWidth(context, 520) < 520
-                      ? double.infinity
-                      : 251,
-                  child: TextField(
-                    controller: rejected,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Cantidad rechazada',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: note,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(labelText: 'Notas de cierre'),
-            ),
-          ],
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancelar'),
-      ),
-      FilledButton(
-        onPressed: () {
-          final good = _n(completed.text);
-          final bad = _n(rejected.text);
-          if (good < 0 || bad < 0 || good + bad <= 0) return;
-          Navigator.pop(
-            context,
-            _OperationCompletion(
-              good,
-              bad,
-              note.text.trim().isEmpty ? null : note.text.trim(),
-            ),
-          );
-        },
-        child: const Text('Completar operación'),
-      ),
-    ],
-  );
-}
-
-class _OperationCompletion {
-  const _OperationCompletion(this.completed, this.rejected, this.note);
-  final double completed;
-  final double rejected;
-  final String? note;
 }
 
 class _MaterialMovementDialog extends StatefulWidget {
@@ -3860,85 +5908,109 @@ class _MaterialMovementDialogState extends State<_MaterialMovementDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Row(
+    title: Row(
       children: [
-        Icon(Icons.layers_outlined, color: PomgtColors.blue, size: 21),
-        SizedBox(width: 10),
-        Text('Registrar movimiento de material'),
+        const Icon(LucideIcons.layers, color: PomgtColors.ink, size: 21),
+        const SizedBox(width: 10),
+        const Expanded(child: Text('Registrar movimiento de material')),
+        IconButton(
+          tooltip: 'Cerrar',
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(LucideIcons.x, size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          visualDensity: VisualDensity.compact,
+        ),
       ],
     ),
     content: SizedBox(
       width: _responsiveDialogWidth(context, 540),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.materialName,
-              style: const TextStyle(color: PomgtColors.muted),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: type,
-              decoration: const InputDecoration(labelText: 'Movimiento'),
-              items: const [
-                DropdownMenuItem(
-                  value: 'issue',
-                  child: Text('Surtido a producción'),
-                ),
-                DropdownMenuItem(value: 'consume', child: Text('Consumo')),
-                DropdownMenuItem(value: 'return', child: Text('Devolución')),
-                DropdownMenuItem(value: 'scrap', child: Text('Merma')),
-                DropdownMenuItem(value: 'adjustment', child: Text('Ajuste')),
-              ],
-              onChanged: (v) => setState(() => type = v ?? 'issue'),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: quantity,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+      child: ScrollToTopArea(
+        padding: const EdgeInsets.all(12),
+        builder: (context, controller) => SingleChildScrollView(
+          controller: controller,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.materialName,
+                style: const TextStyle(color: PomgtColors.muted),
               ),
-              decoration: const InputDecoration(labelText: 'Cantidad *'),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 18,
-              runSpacing: 14,
-              children: [
-                SizedBox(
-                  width: _responsiveDialogWidth(context, 540) < 540
-                      ? double.infinity
-                      : 261,
-                  child: TextField(
-                    controller: lot,
-                    decoration: const InputDecoration(
-                      labelText: 'Lote / serie',
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                errorBuilder: pomgtValidationMessage,
+                initialValue: type,
+                decoration: const InputDecoration(labelText: 'Movimiento'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'issue',
+                    child: Text('Surtido a producción'),
+                  ),
+                  DropdownMenuItem(value: 'consume', child: Text('Consumo')),
+                  DropdownMenuItem(value: 'return', child: Text('Devolución')),
+                  DropdownMenuItem(value: 'scrap', child: Text('Merma')),
+                  DropdownMenuItem(value: 'adjustment', child: Text('Ajuste')),
+                ],
+                onChanged: (v) => setState(() => type = v ?? 'issue'),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: quantity,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: const [
+                  ThousandsInputFormatter(allowNegative: false),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad *',
+                  hintText: 'Ej. 1',
+                ),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 18,
+                runSpacing: 14,
+                children: [
+                  SizedBox(
+                    width: _responsiveDialogWidth(context, 540) < 540
+                        ? double.infinity
+                        : 261,
+                    child: TextField(
+                      controller: lot,
+                      decoration: const InputDecoration(
+                        labelText: 'Lote / serie',
+                        hintText: 'Ej. L-2026-001',
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: _responsiveDialogWidth(context, 540) < 540
-                      ? double.infinity
-                      : 261,
-                  child: TextField(
-                    controller: warehouse,
-                    decoration: const InputDecoration(
-                      labelText: 'Almacén / ubicación',
+                  SizedBox(
+                    width: _responsiveDialogWidth(context, 540) < 540
+                        ? double.infinity
+                        : 261,
+                    child: TextField(
+                      controller: warehouse,
+                      decoration: const InputDecoration(
+                        labelText: 'Almacén / ubicación',
+                        hintText: 'Ej. Almacén 1',
+                      ),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: note,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Notas',
+                  hintText: 'Observaciones del movimiento…',
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: note,
-              minLines: 2,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Notas'),
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -4021,8 +6093,12 @@ class _QualityDialogState extends State<_QualityDialog> {
     Widget field;
     if (type == 'boolean') {
       field = DropdownButtonFormField<bool>(
+        errorBuilder: pomgtValidationMessage,
         initialValue: booleanValue,
-        decoration: const InputDecoration(labelText: 'Resultado *'),
+        decoration: const InputDecoration(
+          labelText: 'Resultado *',
+          hintText: 'Selecciona una opción',
+        ),
         items: const [
           DropdownMenuItem(value: true, child: Text('Sí / Conforme')),
           DropdownMenuItem(value: false, child: Text('No / No conforme')),
@@ -4030,12 +6106,14 @@ class _QualityDialogState extends State<_QualityDialog> {
         onChanged: (v) => setState(() => booleanValue = v),
       );
     } else if (type == 'select' && allowed.isNotEmpty) {
-      field = DropdownButtonFormField<String>(
-        initialValue: selectValue,
-        decoration: const InputDecoration(labelText: 'Resultado *'),
-        items: allowed
-            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-            .toList(),
+      field = CategorizedSearchPicker(
+        label: 'Resultado *',
+        hint: 'Buscar resultado…',
+        value: selectValue,
+        items: [
+          for (final e in allowed)
+            PickerItem(id: e, label: e, category: 'Opciones'),
+        ],
         onChanged: (v) => setState(() => selectValue = v),
       );
     } else {
@@ -4044,70 +6122,85 @@ class _QualityDialogState extends State<_QualityDialog> {
         keyboardType: type == 'number'
             ? const TextInputType.numberWithOptions(decimal: true)
             : TextInputType.text,
+        inputFormatters: type == 'number'
+            ? const [ThousandsInputFormatter(allowNegative: true)]
+            : null,
         decoration: InputDecoration(
           labelText: type == 'number' ? 'Valor medido *' : 'Resultado *',
+          hintText: type == 'number' ? 'Ej. 0' : 'Escribe el resultado',
         ),
       );
     }
     return AlertDialog(
-      title: const Text('Registrar control de calidad'),
+      title: pomgtDialogTitle(context, 'Registrar control de calidad'),
       content: SizedBox(
         width: _responsiveDialogWidth(context, 540),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.check['name']?.toString() ?? 'Control',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _qualityLimits(widget.check),
-                style: const TextStyle(color: PomgtColors.muted, fontSize: 12),
-              ),
-              if ((widget.check['instructions']?.toString() ?? '')
-                  .isNotEmpty) ...[
-                const SizedBox(height: 6),
+        child: ScrollToTopArea(
+          padding: const EdgeInsets.all(12),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 Text(
-                  widget.check['instructions'].toString(),
+                  widget.check['name']?.toString() ?? 'Control',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _qualityLimits(widget.check),
                   style: const TextStyle(
-                    color: PomgtColors.secondaryInk,
+                    color: PomgtColors.muted,
                     fontSize: 12,
                   ),
                 ),
-              ],
-              const SizedBox(height: 16),
-              field,
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String?>(
-                initialValue: forceStatus,
-                decoration: const InputDecoration(
-                  labelText: 'Resultado manual (opcional)',
-                ),
-                items: const [
-                  DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Evaluar automáticamente'),
-                  ),
-                  DropdownMenuItem(value: 'passed', child: Text('Aprobado')),
-                  DropdownMenuItem(value: 'failed', child: Text('Rechazado')),
-                  DropdownMenuItem(
-                    value: 'not_applicable',
-                    child: Text('No aplica'),
+                if ((widget.check['instructions']?.toString() ?? '')
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.check['instructions'].toString(),
+                    style: const TextStyle(
+                      color: PomgtColors.secondaryInk,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
-                onChanged: (v) => setState(() => forceStatus = v),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: note,
-                minLines: 2,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Observaciones'),
-              ),
-            ],
+                const SizedBox(height: 16),
+                field,
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String?>(
+                  errorBuilder: pomgtValidationMessage,
+                  initialValue: forceStatus,
+                  decoration: const InputDecoration(
+                    labelText: 'Resultado manual (opcional)',
+                  ),
+                  items: const [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Evaluar automáticamente'),
+                    ),
+                    DropdownMenuItem(value: 'passed', child: Text('Aprobado')),
+                    DropdownMenuItem(value: 'failed', child: Text('Rechazado')),
+                    DropdownMenuItem(
+                      value: 'not_applicable',
+                      child: Text('No aplica'),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => forceStatus = v),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: note,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Observaciones',
+                    hintText: 'Detalles adicionales…',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -4124,7 +6217,7 @@ class _QualityDialogState extends State<_QualityDialog> {
             else if (type == 'select')
               result = selectValue;
             else if (type == 'number')
-              result = double.tryParse(value.text.trim());
+              result = parseNumberText(value.text)?.toDouble();
             else
               result = value.text.trim();
             if (result == null || (result is String && result.isEmpty)) return;
@@ -4173,8 +6266,12 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
     Widget field;
     if (type == 'boolean') {
       field = DropdownButtonFormField<bool>(
+        errorBuilder: pomgtValidationMessage,
         initialValue: boolValue,
-        decoration: const InputDecoration(labelText: 'Respuesta *'),
+        decoration: const InputDecoration(
+          labelText: 'Respuesta *',
+          hintText: 'Selecciona una opción',
+        ),
         items: const [
           DropdownMenuItem(value: true, child: Text('Sí')),
           DropdownMenuItem(value: false, child: Text('No')),
@@ -4182,12 +6279,14 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
         onChanged: (v) => setState(() => boolValue = v),
       );
     } else if (type == 'select' && allowed.isNotEmpty) {
-      field = DropdownButtonFormField<String>(
-        initialValue: selectValue,
-        decoration: const InputDecoration(labelText: 'Respuesta *'),
-        items: allowed
-            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-            .toList(),
+      field = CategorizedSearchPicker(
+        label: 'Respuesta *',
+        hint: 'Buscar respuesta…',
+        value: selectValue,
+        items: [
+          for (final e in allowed)
+            PickerItem(id: e, label: e, category: 'Opciones'),
+        ],
         onChanged: (v) => setState(() => selectValue = v),
       );
     } else {
@@ -4196,43 +6295,56 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
         keyboardType: type == 'number'
             ? const TextInputType.numberWithOptions(decimal: true)
             : TextInputType.text,
-        decoration: const InputDecoration(labelText: 'Respuesta *'),
+        inputFormatters: type == 'number'
+            ? const [ThousandsInputFormatter(allowNegative: true)]
+            : null,
+        decoration: InputDecoration(
+          labelText: 'Respuesta *',
+          hintText: type == 'number' ? 'Ej. 0' : 'Escribe la respuesta',
+        ),
       );
     }
     return AlertDialog(
-      title: const Text('Responder verificación'),
+      title: pomgtDialogTitle(context, 'Responder verificación'),
       content: SizedBox(
         width: _responsiveDialogWidth(context, 520),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.item['prompt']?.toString() ?? 'Verificación',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              if ((widget.item['instructions']?.toString() ?? '')
-                  .isNotEmpty) ...[
-                const SizedBox(height: 5),
+        child: ScrollToTopArea(
+          padding: const EdgeInsets.all(12),
+          builder: (context, controller) => SingleChildScrollView(
+            controller: controller,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 Text(
-                  widget.item['instructions'].toString(),
-                  style: const TextStyle(
-                    color: PomgtColors.muted,
-                    fontSize: 12,
+                  widget.item['prompt']?.toString() ?? 'Verificación',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if ((widget.item['instructions']?.toString() ?? '')
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    widget.item['instructions'].toString(),
+                    style: const TextStyle(
+                      color: PomgtColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 15),
+                field,
+                const SizedBox(height: 14),
+                TextField(
+                  controller: note,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Notas',
+                    hintText: 'Observaciones adicionales…',
                   ),
                 ),
               ],
-              const SizedBox(height: 15),
-              field,
-              const SizedBox(height: 14),
-              TextField(
-                controller: note,
-                minLines: 2,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Notas'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -4249,7 +6361,7 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
             else if (type == 'select')
               response = selectValue;
             else if (type == 'number')
-              response = double.tryParse(value.text.trim());
+              response = parseNumberText(value.text)?.toDouble();
             else
               response = value.text.trim();
             if (response == null || (response is String && response.isEmpty))
@@ -4299,7 +6411,7 @@ class _CostDialogState extends State<_CostDialog> {
     super.initState();
     for (final field in fields)
       controllers[field[0]] = TextEditingController(
-        text: _n(widget.costs[field[0]]).toStringAsFixed(2),
+        text: formatNumberText(_n(widget.costs[field[0]]).toStringAsFixed(2)),
       );
   }
 
@@ -4311,32 +6423,41 @@ class _CostDialogState extends State<_CostDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Actualizar costos de la OP'),
+    title: pomgtDialogTitle(context, 'Actualizar costos de la OP'),
     content: SizedBox(
       width: _responsiveDialogWidth(context, 680),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 660;
-          return Wrap(
-            spacing: 18,
-            runSpacing: 14,
-            children: [
-              for (final field in fields)
-                SizedBox(
-                  width: wide
-                      ? (constraints.maxWidth - 18) / 2
-                      : constraints.maxWidth,
-                  child: TextField(
-                    controller: controllers[field[0]],
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+      child: ScrollToTopArea(
+        padding: const EdgeInsets.all(12),
+        builder: (context, controller) => SingleChildScrollView(
+          controller: controller,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 660;
+              return Wrap(
+                spacing: 18,
+                runSpacing: 14,
+                children: [
+                  for (final field in fields)
+                    SizedBox(
+                      width: wide
+                          ? (constraints.maxWidth - 18) / 2
+                          : constraints.maxWidth,
+                      child: TextField(
+                        controller: controllers[field[0]],
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: const [
+                          ThousandsInputFormatter(allowNegative: true),
+                        ],
+                        decoration: InputDecoration(labelText: field[1]),
+                      ),
                     ),
-                    decoration: InputDecoration(labelText: field[1]),
-                  ),
-                ),
-            ],
-          );
-        },
+                ],
+              );
+            },
+          ),
+        ),
       ),
     ),
     actions: [
@@ -4394,16 +6515,19 @@ Future<double?> _quantityDialog(
   required double initial,
 }) async {
   final controller = TextEditingController(text: _fmt(initial));
-  final result = await showDialog<double>(
+  final result = await showPomgtDialog<double>(
     context: context,
-    builder: (_) => AlertDialog(
-      title: Text(title),
+    builder: (dialogContext) => AlertDialog(
+      title: pomgtDialogTitle(context, title),
       content: SizedBox(
-        width: 420,
+        width: _responsiveDialogWidth(dialogContext, 420),
         child: TextField(
           controller: controller,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: const [
+            ThousandsInputFormatter(allowNegative: false),
+          ],
           decoration: InputDecoration(labelText: label),
         ),
       ),
@@ -4432,11 +6556,18 @@ Future<bool> _confirm(
   String body, {
   required String confirm,
 }) async =>
-    await showDialog<bool>(
+    await showPomgtDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
+        title: pomgtDialogTitle(
+          context,
+          title,
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Text(body),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -4465,11 +6596,13 @@ double _n(dynamic value) {
 
 String _fmt(dynamic value) {
   final n = _n(value);
-  if (n == n.roundToDouble()) return n.toInt().toString();
-  return n
-      .toStringAsFixed(4)
-      .replaceFirst(RegExp(r'0+$'), '')
-      .replaceFirst(RegExp(r'\.$'), '');
+  if (n == n.roundToDouble()) return formatNumberText(n.toInt());
+  return formatNumberText(
+    n
+        .toStringAsFixed(4)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), ''),
+  );
 }
 
 String _show(dynamic value) =>

@@ -1,4 +1,11 @@
+import 'motion.dart';
+
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadBadge, ShadTheme;
+
+import '../theme/component_theme.dart';
+
 import 'package:flutter/material.dart';
+
 import '../theme/pomgt_theme.dart';
 import '../utils/ui_copy.dart';
 
@@ -40,9 +47,6 @@ class StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDraft =
-        value.toLowerCase().contains('draft') ||
-        value.toLowerCase().contains('borrador');
     final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -59,9 +63,14 @@ class StatusPill extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: plain ? PomgtColors.ink : color,
-              fontSize: plain ? 12 : 11,
-              fontWeight: FontWeight.w800,
+              color: plain
+                  ? PomgtColors.ink
+                  : Color.alphaBlend(
+                      Colors.black.withValues(alpha: .27),
+                      color,
+                    ),
+              fontSize: plain ? 12 : 11.5,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ),
@@ -69,18 +78,22 @@ class StatusPill extends StatelessWidget {
     );
 
     if (plain) {
-      return content;
+      return PomgtAnimatedValue(value: value, child: content);
     }
 
-    return Container(
+    final badge = ShadBadge.outline(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: isDraft
-          ? null
-          : BoxDecoration(
-              color: color.withValues(alpha: .13),
-              borderRadius: PomgtRadii.borderSm,
-            ),
+      backgroundColor: color.withValues(alpha: .08),
+      hoverBackgroundColor: color.withValues(alpha: .08),
+      foregroundColor: PomgtColors.ink,
+      shape: StadiumBorder(
+        side: BorderSide(color: color.withValues(alpha: .20)),
+      ),
       child: content,
     );
+    final themed = ShadTheme.maybeOf(context) == null
+        ? ShadTheme(data: PomgtComponentTheme.shadTheme, child: badge)
+        : badge;
+    return PomgtAnimatedValue(value: value, child: themed);
   }
 }

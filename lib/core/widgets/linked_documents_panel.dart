@@ -1,14 +1,23 @@
+import 'motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import 'pomgt_loading.dart';
+
 import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../data/repositories/document_repository.dart';
 import '../theme/pomgt_theme.dart';
 import '../utils/app_notice.dart';
 import '../utils/error_copy.dart';
 import 'info_tip.dart';
+import 'pomgt_button.dart';
+import 'scroll_to_top.dart';
 
 class LinkedDocumentsPanel extends StatefulWidget {
   const LinkedDocumentsPanel({
@@ -77,7 +86,7 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
       return;
     }
     if (!mounted) return;
-    final meta = await showDialog<_DocumentMeta>(
+    final meta = await showPomgtDialog<_DocumentMeta>(
       context: context,
       builder: (_) =>
           _DocumentMetaDialog(filename: file.name, types: widget.documentTypes),
@@ -121,12 +130,19 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
   }
 
   Future<void> _unlink(Map<String, dynamic> row) async {
-    final ok = await showDialog<bool>(
+    final ok = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Quitar documento'),
-        content: const Text(
-          'El archivo dejará de aparecer en esta sección. El documento original y su historial de versiones se conservarán en el repositorio documental.',
+        title: pomgtDialogTitle(
+          context,
+          'Quitar documento',
+          onClose: () => Navigator.pop(context, false),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text(
+            'El archivo dejará de aparecer en esta sección. El documento original y su historial de versiones se conservarán en el repositorio documental.',
+          ),
         ),
         actions: [
           TextButton(
@@ -152,25 +168,30 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(width: 7),
-              InfoTip(widget.help),
-              const Spacer(),
-              FilledButton.icon(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      widget.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  InfoTip(widget.help),
+                ],
+              ),
+              PomgtButton(
+                label: _uploading ? 'Cargando…' : 'Subir archivo',
+                icon: LucideIcons.cloudUpload,
+                busy: _uploading,
                 onPressed: _uploading ? null : _upload,
-                icon: _uploading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(CupertinoIcons.cloud_upload, size: 17),
-                label: Text(_uploading ? 'Cargando…' : 'Subir archivo'),
               ),
             ],
           ),
@@ -180,9 +201,7 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
               future: _future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  );
+                  return const PomgtLoading();
                 }
                 if (snapshot.hasError) {
                   return Center(
@@ -202,7 +221,7 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(
-                          CupertinoIcons.doc,
+                          LucideIcons.file,
                           size: 30,
                           color: PomgtColors.subtle,
                         ),
@@ -220,73 +239,78 @@ class _LinkedDocumentsPanelState extends State<LinkedDocumentsPanel> {
                         const SizedBox(height: 14),
                         TextButton.icon(
                           onPressed: _upload,
-                          icon: const Icon(CupertinoIcons.add, size: 16),
+                          icon: const Icon(LucideIcons.plus, size: 16),
                           label: const Text('Agregar primer archivo'),
                         ),
                       ],
                     ),
                   );
                 }
-                return ListView.separated(
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final row = rows[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            CupertinoIcons.doc_text,
-                            size: 21,
-                            color: PomgtColors.secondaryInk,
-                          ),
-                          const SizedBox(width: 13),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  row['title']?.toString() ??
-                                      row['original_filename']?.toString() ??
-                                      'Documento',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
+                return ScrollToTopArea(
+                  padding: const EdgeInsets.all(10),
+                  builder: (context, controller) => PomgtListView.separated(
+                    controller: controller,
+                    itemCount: rows.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final row = rows[index];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              LucideIcons.fileText,
+                              size: 21,
+                              color: PomgtColors.secondaryInk,
+                            ),
+                            const SizedBox(width: 13),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    row['title']?.toString() ??
+                                        row['original_filename']?.toString() ??
+                                        'Documento',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${row['document_type'] ?? 'Documento'} · ${row['original_filename'] ?? 'Sin archivo'} · ${_size(row['size_bytes'])}',
-                                  style: const TextStyle(
-                                    color: PomgtColors.muted,
-                                    fontSize: 12,
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${row['document_type'] ?? 'Documento'} · ${row['original_filename'] ?? 'Sin archivo'} · ${_size(row['size_bytes'])}',
+                                    style: const TextStyle(
+                                      color: PomgtColors.muted,
+                                      fontSize: 12,
+                                    ),
                                   ),
+                                ],
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () => _preview(row),
+                              icon: const Icon(LucideIcons.eye, size: 16),
+                              label: const Text('Previsualizar'),
+                            ),
+                            PopupMenuButton<String>(
+                              popUpAnimationStyle: PomgtMotion.style(context),
+                              tooltip: 'Más acciones',
+                              onSelected: (v) {
+                                if (v == 'unlink') _unlink(row);
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'unlink',
+                                  child: Text('Quitar de esta sección'),
                                 ),
                               ],
+                              icon: const Icon(LucideIcons.ellipsis, size: 18),
                             ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () => _preview(row),
-                            icon: const Icon(CupertinoIcons.eye, size: 16),
-                            label: const Text('Previsualizar'),
-                          ),
-                          PopupMenuButton<String>(
-                            tooltip: 'Más acciones',
-                            onSelected: (v) {
-                              if (v == 'unlink') _unlink(row);
-                            },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                value: 'unlink',
-                                child: Text('Quitar de esta sección'),
-                              ),
-                            ],
-                            icon: const Icon(CupertinoIcons.ellipsis, size: 18),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 );
               },
             ),
@@ -376,11 +400,19 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 640;
     return AlertDialog(
-      title: const Row(
+      title: Row(
         children: [
-          Icon(Icons.note_add_outlined, size: 22),
-          SizedBox(width: 10),
-          Text('Información del documento'),
+          const Icon(LucideIcons.filePlus, size: 22, color: PomgtColors.ink),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Información del documento')),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(LucideIcons.x, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+          ),
         ],
       ),
       content: SizedBox(
@@ -391,10 +423,14 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
             children: [
               TextField(
                 controller: title,
-                decoration: const InputDecoration(labelText: 'Título *'),
+                decoration: const InputDecoration(
+                  labelText: 'Título *',
+                  hintText: 'Escribe un título para el documento',
+                ),
               ),
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
+                errorBuilder: pomgtValidationMessage,
                 initialValue: type,
                 isExpanded: true,
                 decoration: const InputDecoration(
@@ -412,6 +448,7 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
                 maxLines: 4,
                 decoration: const InputDecoration(
                   labelText: 'Descripción / notas',
+                  hintText: 'Contexto adicional sobre este documento…',
                 ),
               ),
               const SizedBox(height: 10),

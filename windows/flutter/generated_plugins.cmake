@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  desktop_drop
   printing
   url_launcher_windows
 )

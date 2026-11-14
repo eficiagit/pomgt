@@ -1,7 +1,7 @@
 import 'base_repository.dart';
 
 class CustomerRepository extends BaseRepository {
-  CustomerRepository(super.service, super.client);
+  CustomerRepository(super.service, super.client, {super.runtimeData});
 
   Future<List<Map<String, dynamic>>> customers() =>
       listTenant('customers', orderBy: 'legal_name');
@@ -70,5 +70,10 @@ class CustomerRepository extends BaseRepository {
       'nonconformities': results[8],
       'documents': results[9],
     };
+  }
+
+  Future<void> deleteCustomer(String customerId) async {
+    await service.rpc('delete_customer', params: {'p_customer_id': customerId});
+    runtimeData?.tableChanged('customers');
   }
 }

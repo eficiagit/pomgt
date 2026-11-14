@@ -1,15 +1,24 @@
+import '../../core/widgets/motion.dart';
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../core/widgets/pomgt_loading.dart';
+
 import 'dart:math' as math;
-import 'package:flutter/cupertino.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/runtime_data_controller.dart';
 import '../../core/theme/pomgt_theme.dart';
 import '../../core/utils/app_notice.dart';
 import '../../core/utils/error_copy.dart';
 import '../../core/utils/ui_copy.dart';
 import '../../core/widgets/info_tip.dart';
+import '../../core/widgets/scroll_to_top.dart';
 import '../../data/phase1_schema.dart';
 import '../../data/repositories/generic_repository.dart';
+import '../../core/widgets/section_title.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -96,9 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             future: future,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                );
+                return const PomgtLoading();
               }
               if (snapshot.hasError) {
                 return Center(
@@ -115,75 +122,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 query,
               );
               final compact = MediaQuery.sizeOf(context).width < 640;
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  compact ? 12 : 28,
-                  compact ? 14 : 22,
-                  compact ? 12 : 28,
-                  compact ? 16 : 28,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _DashboardTitle(date: data.todayDate),
-                    const SizedBox(height: 16),
-                    _KpiBoard(kpis: data.kpis),
-                    const SizedBox(height: 16),
-                    _ChartGrid(
-                      left: _Panel(
-                        title: 'Producción de la última semana',
-                        action: 'Últimos 7 días',
-                        child: _LineChart(
-                          values: data.weekProduction,
-                          labels: data.weekLabels,
-                          maxLabel: '200',
-                          legend: 'Unidades producidas',
-                          color: PomgtColors.blue,
+              return ScrollToTopArea(
+                padding: const EdgeInsets.all(16),
+                builder: (context, controller) => SingleChildScrollView(
+                  controller: controller,
+                  padding: EdgeInsets.fromLTRB(
+                    compact ? 12 : 28,
+                    compact ? 14 : 22,
+                    compact ? 12 : 28,
+                    compact ? 16 : 28,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _DashboardTitle(date: data.todayDate),
+                      const SizedBox(height: 16),
+                      _KpiBoard(kpis: data.kpis),
+                      const SizedBox(height: 16),
+                      _ChartGrid(
+                        left: _Panel(
+                          title: 'Producción de la última semana',
+                          action: 'Últimos 7 días',
+                          child: _LineChart(
+                            values: data.weekProduction,
+                            labels: data.weekLabels,
+                            maxLabel: '200',
+                            legend: 'Unidades producidas',
+                            color: PomgtColors.blue,
+                          ),
+                        ),
+                        center: _Panel(
+                          title: 'Utilización de capacidad',
+                          action: 'Últimos 7 días',
+                          child: _LineChart(
+                            values: data.weekCapacity,
+                            labels: data.weekLabels,
+                            maxLabel: '100%',
+                            legend: 'Capacidad utilizada',
+                            color: PomgtColors.blue,
+                            percent: true,
+                          ),
+                        ),
+                        right: _Panel(
+                          title: 'Estado de órdenes de producción',
+                          child: _DonutStatus(items: data.productionStatus),
                         ),
                       ),
-                      center: _Panel(
-                        title: 'Utilización de capacidad',
-                        action: 'Últimos 7 días',
-                        child: _LineChart(
-                          values: data.weekCapacity,
-                          labels: data.weekLabels,
-                          maxLabel: '100%',
-                          legend: 'Capacidad utilizada',
-                          color: PomgtColors.blue,
-                          percent: true,
+                      const SizedBox(height: 16),
+                      _ChartGrid(
+                        left: _Panel(
+                          title: 'Actividad reciente',
+                          link: 'Ver toda',
+                          child: _ActivityList(items: data.activity),
+                        ),
+                        center: _Panel(
+                          title: 'Próximos vencimientos',
+                          link: 'Ver todos',
+                          child: _DueList(items: data.timeline),
+                        ),
+                        right: _Panel(
+                          title: 'Alertas',
+                          link: 'Ver todas',
+                          child: _AlertList(alerts: data.alerts),
                         ),
                       ),
-                      right: _Panel(
-                        title: 'Estado de órdenes de producción',
-                        child: _DonutStatus(items: data.productionStatus),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _ChartGrid(
-                      left: _Panel(
-                        title: 'Actividad reciente',
-                        link: 'Ver toda',
-                        child: _ActivityList(items: data.activity),
-                      ),
-                      center: _Panel(
-                        title: 'Próximos vencimientos',
-                        link: 'Ver todos',
-                        child: _DueList(items: data.timeline),
-                      ),
-                      right: _Panel(
-                        title: 'Alertas',
+                      const SizedBox(height: 16),
+                      _Panel(
+                        title: 'Órdenes de producción recientes',
                         link: 'Ver todas',
-                        child: _AlertList(alerts: data.alerts),
+                        padding: EdgeInsets.zero,
+                        child: _RecentOrdersTable(rows: data.recentOps),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    _Panel(
-                      title: 'Órdenes de producción recientes',
-                      link: 'Ver todas',
-                      padding: EdgeInsets.zero,
-                      child: _RecentOrdersTable(rows: data.recentOps),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               );
             },
@@ -236,14 +247,14 @@ class _DashboardTopBar extends StatelessWidget {
                     ),
                     decoration: InputDecoration(
                       hintText: 'Buscar clientes, pedidos o productos',
-                      prefixIcon: const Icon(CupertinoIcons.search, size: 20),
+                      prefixIcon: const Icon(LucideIcons.search, size: 20),
                       suffixIcon: query.isEmpty
                           ? null
                           : IconButton(
                               tooltip: 'Limpiar búsqueda',
                               onPressed: onClear,
                               icon: const Icon(
-                                CupertinoIcons.xmark,
+                                LucideIcons.x,
                                 size: 15,
                                 color: PomgtColors.muted,
                               ),
@@ -263,7 +274,7 @@ class _DashboardTopBar extends StatelessWidget {
             tooltip: 'Notificaciones',
             onPressed: () =>
                 showPomgtSnackBar(context, 'No hay notificaciones nuevas.'),
-            icon: const Icon(CupertinoIcons.bell, color: PomgtColors.muted),
+            icon: const Icon(LucideIcons.bell, color: PomgtColors.muted),
           ),
           if (!compact) ...[
             const SizedBox(width: 12),
@@ -277,7 +288,7 @@ class _DashboardTopBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(CupertinoIcons.chevron_down, size: 14),
+            const Icon(LucideIcons.chevronDown, size: 14),
             const SizedBox(width: 18),
           ],
           SizedBox(
@@ -313,10 +324,7 @@ class _DashboardTitle extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text(
-                    'Inicio',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
+                  const SectionTitle('Inicio', icon: LucideIcons.panelsTopLeft),
                   const SizedBox(width: 8),
                   const InfoTip(
                     'Centro de control de la operación de manufactura.',
@@ -478,49 +486,49 @@ class _DashboardData {
       'Producción activa',
       activeOps.length,
       'OPs en proceso',
-      Icons.play_circle_outline,
+      LucideIcons.circlePlay,
       PomgtColors.blue,
     ),
     _Kpi(
       'OPs programadas',
       scheduledOps,
       'Esta semana',
-      Icons.event_available_outlined,
+      LucideIcons.calendarCheck,
       PomgtColors.blue,
     ),
     _Kpi(
       'OPs atrasadas',
       lateOps,
       'Requieren atención',
-      Icons.schedule_outlined,
+      LucideIcons.clock,
       PomgtColors.danger,
     ),
     _Kpi(
       'OPs bloqueadas',
       blockedOps,
       'Sin materiales',
-      Icons.block_outlined,
+      LucideIcons.ban,
       PomgtColors.danger,
     ),
     _Kpi(
       'Órdenes por vencer',
       dueOrders,
       'Próximos 7 días',
-      Icons.alarm_outlined,
+      LucideIcons.alarmClock,
       PomgtColors.amber,
     ),
     _Kpi(
       'Producción completada hoy',
       completedToday,
       'Unidades producidas',
-      Icons.task_alt_outlined,
+      LucideIcons.circleCheck,
       PomgtColors.success,
     ),
     _Kpi(
       'Capacidad utilizada',
       (capacityUsed * 100).round(),
       'De la capacidad total',
-      Icons.bar_chart_rounded,
+      LucideIcons.chartColumn,
       PomgtColors.blue,
       suffix: '%',
     ),
@@ -528,35 +536,35 @@ class _DashboardData {
       'Materiales faltantes',
       missingMaterials,
       'Afectan OPs',
-      Icons.inventory_2_outlined,
+      LucideIcons.package,
       PomgtColors.danger,
     ),
     _Kpi(
       'Compras pendientes',
       pendingPurchases,
       'En tránsito o por emitir',
-      Icons.shopping_cart_outlined,
+      LucideIcons.shoppingCart,
       PomgtColors.amber,
     ),
     _Kpi(
       'Inspecciones pendientes',
       pendingInspections,
       'Por liberar',
-      Icons.fact_check_outlined,
+      LucideIcons.clipboardCheck,
       PomgtColors.blue,
     ),
     _Kpi(
       'Entregas próximas',
       upcomingDeliveries,
       'Próximos 7 días',
-      Icons.local_shipping_outlined,
+      LucideIcons.truck,
       PomgtColors.blue,
     ),
     _Kpi(
       'Alertas',
       alerts.length,
       'Requiere atención',
-      Icons.notifications_none_rounded,
+      LucideIcons.bell,
       PomgtColors.danger,
     ),
   ];
@@ -759,7 +767,6 @@ class _KpiBoard extends StatelessWidget {
         border: Border.all(
           color: PomgtColors.lineStrong.withValues(alpha: .55),
         ),
-        boxShadow: PomgtShadows.card,
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -851,7 +858,7 @@ class _KpiTile extends StatelessWidget {
                   style: const TextStyle(
                     color: PomgtColors.ink,
                     fontSize: 24,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w500,
                     height: 1,
                   ),
                 ),
@@ -988,7 +995,6 @@ class _Panel extends StatelessWidget {
         border: Border.all(
           color: PomgtColors.lineStrong.withValues(alpha: .55),
         ),
-        boxShadow: PomgtShadows.card,
       ),
       child: Column(
         children: [
@@ -1006,8 +1012,8 @@ class _Panel extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: PomgtColors.ink,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -1024,7 +1030,7 @@ class _Panel extends StatelessWidget {
                     style: const TextStyle(
                       color: PomgtColors.blue,
                       fontSize: 12,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
               ],
@@ -1049,21 +1055,21 @@ class _FilterChipLike extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
         borderRadius: PomgtRadii.borderSm,
-        border: Border.all(color: PomgtColors.line),
+        border: Border.all(color: PomgtColors.lineStrong),
       ),
       child: Row(
         children: [
           Text(
             label,
             style: const TextStyle(
-              color: PomgtColors.muted,
+              color: PomgtColors.secondaryInk,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(width: 8),
           const Icon(
-            CupertinoIcons.chevron_down,
+            LucideIcons.chevronDown,
             size: 13,
             color: PomgtColors.muted,
           ),
@@ -1073,7 +1079,7 @@ class _FilterChipLike extends StatelessWidget {
   }
 }
 
-class _LineChart extends StatelessWidget {
+class _LineChart extends StatefulWidget {
   const _LineChart({
     required this.values,
     required this.labels,
@@ -1091,21 +1097,58 @@ class _LineChart extends StatelessWidget {
   final bool percent;
 
   @override
+  State<_LineChart> createState() => _LineChartState();
+}
+
+class _LineChartState extends State<_LineChart> {
+  int? _hoverIndex;
+
+  // Mirrors the x-axis math _AreaChartPainter uses to place each point, so
+  // a pointer position maps back to the nearest data point.
+  void _updateHover(Offset localPosition, double width) {
+    const left = 38.0;
+    final chartWidth = width - left - 4;
+    if (chartWidth <= 0 || widget.values.length < 2) return;
+    final relative = ((localPosition.dx - left) / chartWidth).clamp(0.0, 1.0);
+    final index = (relative * (widget.values.length - 1)).round().clamp(
+      0,
+      widget.values.length - 1,
+    );
+    if (index != _hoverIndex) setState(() => _hoverIndex = index);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final values = widget.values;
+    final labels = widget.labels;
+    final color = widget.color;
+    final percent = widget.percent;
+    final maxLabel = widget.maxLabel;
+    final legend = widget.legend;
     return SizedBox(
       height: 190,
       child: Column(
         children: [
           Expanded(
-            child: CustomPaint(
-              painter: _AreaChartPainter(
-                values: values,
-                labels: labels,
-                color: color,
-                percent: percent,
-                maxLabel: maxLabel,
+            child: LayoutBuilder(
+              builder: (context, constraints) => MouseRegion(
+                onHover: (event) =>
+                    _updateHover(event.localPosition, constraints.maxWidth),
+                onExit: (_) {
+                  if (_hoverIndex != null) setState(() => _hoverIndex = null);
+                },
+                child: CustomPaint(
+                  painter: _AreaChartPainter(
+                    values: values,
+                    labels: labels,
+                    color: color,
+                    percent: percent,
+                    maxLabel: maxLabel,
+                    hoverIndex: _hoverIndex,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
               ),
-              child: const SizedBox.expand(),
             ),
           ),
           const SizedBox(height: 8),
@@ -1123,7 +1166,7 @@ class _LineChart extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -1141,6 +1184,7 @@ class _AreaChartPainter extends CustomPainter {
     required this.color,
     required this.percent,
     required this.maxLabel,
+    this.hoverIndex,
   });
 
   final List<double> values;
@@ -1148,6 +1192,7 @@ class _AreaChartPainter extends CustomPainter {
   final Color color;
   final bool percent;
   final String maxLabel;
+  final int? hoverIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1219,6 +1264,71 @@ class _AreaChartPainter extends CustomPainter {
       canvas.drawCircle(point, 4.2, Paint()..color = PomgtColors.canvas);
       canvas.drawCircle(point, 3.2, Paint()..color = color);
     }
+
+    final hover = hoverIndex;
+    if (hover != null && hover >= 0 && hover < points.length) {
+      final point = points[hover];
+      canvas.drawLine(
+        Offset(point.dx, top),
+        Offset(point.dx, top + chartHeight),
+        Paint()
+          ..color = color.withValues(alpha: .35)
+          ..strokeWidth = 1,
+      );
+      canvas.drawCircle(point, 5.5, Paint()..color = PomgtColors.canvas);
+      canvas.drawCircle(
+        point,
+        5.5,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6,
+      );
+      canvas.drawCircle(point, 3.2, Paint()..color = color);
+
+      final valueText = percent
+          ? '${(values[hover] * 100).round()}%'
+          : values[hover].round().toString();
+      final tooltip = TextPainter(textDirection: TextDirection.ltr)
+        ..text = TextSpan(
+          children: [
+            TextSpan(
+              text: '${labels[hover]}\n',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            TextSpan(
+              text: valueText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        )
+        ..layout();
+
+      const padding = 6.0;
+      final boxWidth = tooltip.width + padding * 2;
+      final boxHeight = tooltip.height + padding * 2;
+      final boxLeft = (point.dx - boxWidth / 2)
+          .clamp(0.0, math.max(0.0, size.width - boxWidth))
+          .toDouble();
+      var boxTop = point.dy - boxHeight - 10;
+      if (boxTop < 0) boxTop = point.dy + 10;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(boxLeft, boxTop, boxWidth, boxHeight),
+          const Radius.circular(6),
+        ),
+        Paint()..color = PomgtColors.ink.withValues(alpha: .92),
+      );
+      tooltip.paint(canvas, Offset(boxLeft + padding, boxTop + padding));
+    }
   }
 
   void _paintText(
@@ -1242,7 +1352,7 @@ class _AreaChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AreaChartPainter oldDelegate) =>
-      oldDelegate.values != values;
+      oldDelegate.values != values || oldDelegate.hoverIndex != hoverIndex;
 }
 
 class _StatusItem {
@@ -1326,7 +1436,7 @@ class _DonutStatus extends StatelessWidget {
                           style: const TextStyle(
                             color: PomgtColors.muted,
                             fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
@@ -1335,7 +1445,7 @@ class _DonutStatus extends StatelessWidget {
                         style: const TextStyle(
                           color: PomgtColors.ink,
                           fontSize: 12,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -1347,7 +1457,7 @@ class _DonutStatus extends StatelessWidget {
                           style: const TextStyle(
                             color: PomgtColors.muted,
                             fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
@@ -1444,7 +1554,7 @@ class _ActivityList extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.muted,
                         fontSize: 12,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1461,7 +1571,7 @@ class _ActivityList extends StatelessWidget {
                       style: const TextStyle(
                         color: PomgtColors.ink,
                         fontSize: 12.5,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1484,7 +1594,7 @@ class _ActivityList extends StatelessWidget {
                 style: TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -1535,7 +1645,7 @@ class _DueList extends StatelessWidget {
                   style: const TextStyle(
                     color: PomgtColors.muted,
                     fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -1556,7 +1666,7 @@ class _DueList extends StatelessWidget {
                   style: const TextStyle(
                     color: PomgtColors.ink,
                     fontSize: 12,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -1567,7 +1677,7 @@ class _DueList extends StatelessWidget {
                   style: const TextStyle(
                     color: PomgtColors.muted,
                     fontSize: 12,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -1576,7 +1686,7 @@ class _DueList extends StatelessWidget {
                 style: const TextStyle(
                   color: PomgtColors.muted,
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -1628,7 +1738,7 @@ class _AlertList extends StatelessWidget {
                     style: const TextStyle(
                       color: PomgtColors.ink,
                       fontSize: 12.5,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -1651,7 +1761,7 @@ class _AlertList extends StatelessWidget {
               style: const TextStyle(
                 color: PomgtColors.muted,
                 fontSize: 11.5,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -1764,8 +1874,8 @@ class _RecentOrdersTable extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: header ? PomgtColors.muted : PomgtColors.ink,
-                      fontSize: header ? 11.5 : 12,
-                      fontWeight: header ? FontWeight.w900 : FontWeight.w800,
+                      fontSize: header ? 12 : 12.5,
+                      fontWeight: header ? FontWeight.w500 : FontWeight.w500,
                     ),
                   ),
           ),
@@ -1781,26 +1891,29 @@ class _StatusText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _colorForStatus(status);
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            UiCopy.enumLabel(status),
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: PomgtColors.ink,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+    return PomgtAnimatedValue(
+      value: status,
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              UiCopy.enumLabel(status),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: PomgtColors.ink,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1817,7 +1930,7 @@ class _ProgressCell extends StatelessWidget {
         Expanded(
           child: ClipRRect(
             borderRadius: PomgtRadii.borderSm,
-            child: LinearProgressIndicator(
+            child: PomgtProgressIndicator(
               value: value,
               minHeight: 8,
               backgroundColor: PomgtColors.surfaceAlt,
@@ -1834,7 +1947,7 @@ class _ProgressCell extends StatelessWidget {
             style: const TextStyle(
               color: PomgtColors.muted,
               fontSize: 12,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),

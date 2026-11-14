@@ -1,9 +1,11 @@
 import 'dart:typed_data';
+
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
 import '../repositories/document_repository.dart';
 import '../repositories/production_repository.dart';
 
@@ -45,9 +47,8 @@ class ProductionOrderPdfService {
     final machines =
         (data['machines'] as Map?)?.cast<String, Map<String, dynamic>>() ??
         const {};
-    final logoBytes = (await rootBundle.load(
-      'assets/POMGT-LOGO.png',
-    )).buffer.asUint8List();
+    final logoBytes = (await rootBundle.load('assets/POMGT-LOGO.png')).buffer
+        .asUint8List();
     final logo = pw.MemoryImage(logoBytes);
     final iconFont = pw.Font.ttf(
       await rootBundle.load(
@@ -70,8 +71,15 @@ class ProductionOrderPdfService {
     const green = PdfColor.fromInt(0xFF0F9F60);
     const greenSoft = PdfColor.fromInt(0xFFE7F8EE);
 
-    final regular = await PdfGoogleFonts.notoSansRegular();
-    final bold = await PdfGoogleFonts.notoSansBold();
+    // Bundled locally: fetching these from Google Fonts on every PDF made
+    // preview/download slow (or stall) whenever the network was slow or
+    // blocked.
+    final regular = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    );
+    final bold = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
+    );
     final theme = pw.ThemeData.withFont(base: regular, bold: bold);
 
     pw.Widget labelValue(String label, String value) => pw.Column(
@@ -295,7 +303,7 @@ class ProductionOrderPdfService {
             ],
             [
               labelValue(
-                'Lista de materiales',
+                'Estructura de fabricación',
                 '${order['bom_code'] ?? '-'} - ${order['bom_revision_code'] ?? '-'}',
               ),
               labelValue(
@@ -564,8 +572,7 @@ class ProductionOrderPdfService {
       entityId: orderId,
       title: 'Orden de producción $number',
       documentType: 'Orden de producción',
-      description:
-          'PDF generado por POMGT con el estado de la orden al momento de su generación.',
+      description: 'PDF generado por POMGT con el estado de la orden al momento de su generación.',
       bytes: bytes,
       filename: '$number.pdf',
       mimeType: 'application/pdf',
@@ -694,11 +701,6 @@ class ProductionOrderPdfService {
                   ),
                 ),
               ),
-              pw.Container(
-                width: .7,
-                height: materials.isEmpty ? 22 : 32,
-                color: line,
-              ),
             ],
           ),
           pw.SizedBox(width: 7),
@@ -755,76 +757,81 @@ class ProductionOrderPdfService {
                         ),
                       ),
                       pw.SizedBox(width: 10),
-                      pw.Container(width: .7, height: 33, color: line),
-                      pw.SizedBox(width: 12),
                       pw.Expanded(
-                        child: pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Row(
-                              crossAxisAlignment: pw.CrossAxisAlignment.start,
-                              children: [
-                                pw.Expanded(
-                                  child: pair(
-                                    'Tipo',
-                                    _status(op['operation_type']),
-                                  ),
-                                ),
-                                pw.Expanded(child: pair('Centro', workCenter)),
-                                pw.Expanded(child: pair('Maquina', machine)),
-                                pw.Expanded(
-                                  child: pair(
-                                    'Cantidad',
-                                    '${_qty(op['completed_quantity'])} / ${_qty(op['planned_quantity'])}',
-                                  ),
-                                ),
-                                pw.Expanded(
-                                  child: pair(
-                                    'Inicio',
-                                    _shortDate(
-                                      op['actual_start_at'] ??
-                                          op['planned_start_at'],
-                                    ),
-                                  ),
-                                ),
-                                pw.Expanded(
-                                  child: pair(
-                                    'Fin',
-                                    _shortDate(
-                                      op['actual_end_at'] ??
-                                          op['planned_end_at'],
-                                    ),
-                                  ),
-                                ),
-                                pw.Expanded(
-                                  flex: 3,
-                                  child: pair('Firma', '____________________'),
-                                ),
-                              ],
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.only(left: 12),
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              left: pw.BorderSide(color: line, width: .7),
                             ),
-                            pw.SizedBox(height: 5),
-                            if (materials.isEmpty)
-                              _linkedMaterialEmpty(line, muted)
-                            else
-                              _materialsBox(
-                                materials: materials,
-                                products: products,
-                                units: units,
-                                materialRevisions: materialRevisions,
-                                materialAttributeValues:
-                                    materialAttributeValues,
-                                materialAttributeDefinitions:
-                                    materialAttributeDefinitions,
-                                line: line,
-                                ink: ink,
-                                blue: blue,
-                                muted: muted,
+                          ),
+                          child: pw.Row(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Expanded(
+                                child: pair(
+                                  'Tipo',
+                                  _status(op['operation_type']),
+                                ),
                               ),
-                          ],
+                              pw.Expanded(child: pair('Centro', workCenter)),
+                              pw.Expanded(child: pair('Maquina', machine)),
+                              pw.Expanded(
+                                child: pair(
+                                  'Cantidad',
+                                  '${_qty(op['completed_quantity'])} / ${_qty(op['planned_quantity'])}',
+                                ),
+                              ),
+                              pw.Expanded(
+                                child: pair(
+                                  'Inicio',
+                                  _shortDate(
+                                    op['actual_start_at'] ??
+                                        op['planned_start_at'],
+                                  ),
+                                ),
+                              ),
+                              pw.Expanded(
+                                child: pair(
+                                  'Fin',
+                                  _shortDate(
+                                    op['actual_end_at'] ?? op['planned_end_at'],
+                                  ),
+                                ),
+                              ),
+                              pw.Expanded(
+                                flex: 3,
+                                child: pair('Firma', '____________________'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
                   ),
+                  // Materials span the operation's full width below the
+                  // name/description + resource-fields row, instead of
+                  // being squeezed into the right-hand column next to the
+                  // vertical divider - that left the divider running the
+                  // full height of a tall materials table while the short
+                  // name/description block above it left blank space.
+                  pw.SizedBox(height: 5),
+                  if (materials.isEmpty)
+                    _linkedMaterialEmpty(line, muted)
+                  else
+                    _materialsBox(
+                      materials: materials,
+                      products: products,
+                      units: units,
+                      materialRevisions: materialRevisions,
+                      materialAttributeValues: materialAttributeValues,
+                      materialAttributeDefinitions:
+                          materialAttributeDefinitions,
+                      line: line,
+                      ink: ink,
+                      blue: blue,
+                      muted: muted,
+                    ),
                   if ((op['instructions']?.toString() ?? '')
                       .trim()
                       .isNotEmpty) ...[

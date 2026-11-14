@@ -1,6 +1,8 @@
 import 'dart:typed_data';
+
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+
 import '../services/document_storage_service.dart';
 import 'base_repository.dart';
 
@@ -211,4 +213,7 @@ class DocumentRepository extends BaseRepository {
 
   Future<void> unlink(String linkId) =>
       service.delete('document_links', linkId);
+
+  Future<void> deleteDocument(String documentId) =>
+      service.rpc('delete_document', params: {'p_document_id': documentId});
 }

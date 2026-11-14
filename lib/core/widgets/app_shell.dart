@@ -1,6 +1,9 @@
-import 'package:flutter/cupertino.dart';
+import 'dart:math' as math;
+
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/auth_controller.dart';
 import '../../controllers/navigation_controller.dart';
 import '../../controllers/organization_controller.dart';
@@ -8,11 +11,13 @@ import '../../features/bom/bom_screen.dart';
 import '../../features/customers/customers_screen.dart';
 import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/documents/documents_screen.dart';
+import '../../features/floor_map/floor_map_screen.dart';
 import '../../features/master_data/master_data_screen.dart';
 import '../../features/materials/materials_screen.dart';
 import '../../features/orders/orders_screen.dart';
 import '../../features/production/production_screen.dart';
 import '../../features/products/products_screen.dart';
+import '../../features/roles/roles_screen.dart';
 import '../../features/routings/routings_screen.dart';
 import '../../features/schema/schema_coverage_screen.dart';
 import '../theme/pomgt_theme.dart';
@@ -79,10 +84,14 @@ class AppShell extends StatelessWidget {
         return const RoutingsScreen();
       case AppSection.production:
         return const ProductionScreen();
+      case AppSection.floorMap:
+        return const FloorMapScreen();
       case AppSection.documents:
         return const DocumentsScreen();
       case AppSection.masterData:
         return const MasterDataScreen();
+      case AppSection.roles:
+        return const RolesScreen();
       case AppSection.schema:
         return const SchemaCoverageScreen();
     }
@@ -100,15 +109,16 @@ class _MobileNavButton extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 10, 0, 0),
           child: Builder(
-            builder: (context) => Material(
-              color: PomgtColors.canvas,
-              borderRadius: PomgtRadii.borderSm,
-              elevation: 4,
-              shadowColor: Colors.black.withValues(alpha: .16),
+            builder: (context) => Container(
+              decoration: BoxDecoration(
+                color: PomgtColors.canvas,
+                borderRadius: PomgtRadii.borderSm,
+                border: Border.all(color: PomgtColors.line),
+              ),
               child: IconButton(
                 tooltip: 'Abrir navegación',
                 onPressed: () => Scaffold.of(context).openDrawer(),
-                icon: const Icon(CupertinoIcons.sidebar_left, size: 20),
+                icon: const Icon(LucideIcons.panelLeft, size: 20),
               ),
             ),
           ),
@@ -131,16 +141,9 @@ class _TopBar extends StatelessWidget {
     return Container(
       height: compact ? 64 : 82,
       padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 32),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: PomgtColors.canvas,
-        border: const Border(bottom: BorderSide(color: PomgtColors.line)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .025),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border(bottom: BorderSide(color: PomgtColors.line)),
       ),
       child: Row(
         children: [
@@ -149,7 +152,7 @@ class _TopBar extends StatelessWidget {
               builder: (context) => IconButton(
                 tooltip: 'Abrir navegación',
                 onPressed: () => Scaffold.of(context).openDrawer(),
-                icon: const Icon(CupertinoIcons.sidebar_left, size: 20),
+                icon: const Icon(LucideIcons.panelLeft, size: 20),
               ),
             ),
             SizedBox(width: compact ? 4 : 8),
@@ -157,8 +160,7 @@ class _TopBar extends StatelessWidget {
           const Spacer(),
           if (org != null && !compact)
             Tooltip(
-              message:
-                  'Organización activa. Todos los registros mostrados pertenecen a esta empresa.',
+              message: 'Organización activa. Todos los registros mostrados pertenecen a esta empresa.',
               child: Text(
                 org['display_name']?.toString() ?? 'Organización',
                 style: const TextStyle(
@@ -169,6 +171,7 @@ class _TopBar extends StatelessWidget {
             ),
           SizedBox(width: compact ? 8 : 18),
           PopupMenuButton<String>(
+            popUpAnimationStyle: PomgtMotion.style(context),
             tooltip: 'Cuenta',
             offset: const Offset(0, 42),
             onSelected: (value) {
@@ -179,10 +182,17 @@ class _TopBar extends StatelessWidget {
             itemBuilder: (_) => [
               PopupMenuItem(
                 enabled: false,
-                child: SizedBox(
-                  width: 220,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: (MediaQuery.sizeOf(context).width - 40).clamp(
+                      0.0,
+                      220.0,
+                    ),
+                  ),
                   child: Text(
                     user?.email ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: PomgtColors.muted),
                   ),
                 ),
@@ -192,14 +202,19 @@ class _TopBar extends StatelessWidget {
                 value: 'logout',
                 child: Row(
                   children: [
-                    Icon(CupertinoIcons.square_arrow_right, size: 18),
+                    Icon(LucideIcons.logOut, size: 18),
                     SizedBox(width: 10),
                     Text('Cerrar sesión'),
                   ],
                 ),
               ),
             ],
-            child: SizedBox(
+            child: Container(
+              decoration: BoxDecoration(
+                color: PomgtColors.blueSoft,
+                borderRadius: PomgtRadii.borderSm,
+                border: Border.all(color: PomgtColors.navySelectedBorder),
+              ),
               width: 38,
               height: 38,
               child: Center(
@@ -225,29 +240,144 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _Sidebar extends StatelessWidget {
+/// A nav item nested inside a [_NavGroupSpec], or the group header itself
+/// when used standalone (Inicio).
+class _NavItemSpec {
+  const _NavItemSpec({
+    required this.section,
+    required this.icon,
+    required this.label,
+  });
+  final AppSection section;
+  final IconData icon;
+  final String label;
+}
+
+/// A collapsible sidebar section, e.g. "Ventas" grouping Clientes y
+/// Pedidos. Only rendered as a nested, collapsible group when the sidebar
+/// is expanded — the icon-only collapsed rail stays a flat list since
+/// there's no room to show a header there anyway.
+class _NavGroupSpec {
+  const _NavGroupSpec({
+    required this.label,
+    required this.icon,
+    required this.items,
+  });
+  final String label;
+  final IconData icon;
+  final List<_NavItemSpec> items;
+}
+
+// Mixes standalone items (e.g. Producción, now that it's the only item left
+// in what used to be its own group) with collapsible groups, in display
+// order. Each entry is either a [_NavItemSpec] or a [_NavGroupSpec].
+const _navEntries = <Object>[
+  _NavGroupSpec(
+    label: 'Ventas',
+    icon: LucideIcons.tag,
+    items: [
+      _NavItemSpec(
+        section: AppSection.customers,
+        icon: LucideIcons.building2,
+        label: 'Clientes',
+      ),
+      _NavItemSpec(
+        section: AppSection.orders,
+        icon: LucideIcons.fileText,
+        label: 'Pedidos',
+      ),
+    ],
+  ),
+  _NavGroupSpec(
+    label: 'Catálogo',
+    icon: LucideIcons.layers,
+    items: [
+      _NavItemSpec(
+        section: AppSection.products,
+        icon: LucideIcons.box,
+        label: 'Productos',
+      ),
+      _NavItemSpec(
+        section: AppSection.materials,
+        icon: LucideIcons.layers,
+        label: 'Materiales',
+      ),
+      _NavItemSpec(
+        section: AppSection.bom,
+        icon: LucideIcons.layers,
+        label: 'Estructuras de fabricación',
+      ),
+      _NavItemSpec(
+        section: AppSection.routings,
+        icon: LucideIcons.gitBranch,
+        label: 'Rutas de fabricación',
+      ),
+    ],
+  ),
+  _NavItemSpec(
+    section: AppSection.production,
+    icon: LucideIcons.settings,
+    label: 'Producción',
+  ),
+  _NavItemSpec(
+    section: AppSection.floorMap,
+    icon: LucideIcons.map,
+    label: 'Mapa de planta',
+  ),
+  _NavGroupSpec(
+    label: 'Sistema',
+    icon: LucideIcons.slidersHorizontal,
+    items: [
+      _NavItemSpec(
+        section: AppSection.documents,
+        icon: LucideIcons.folder,
+        label: 'Documentos',
+      ),
+      _NavItemSpec(
+        section: AppSection.masterData,
+        icon: LucideIcons.slidersHorizontal,
+        label: 'Datos maestros',
+      ),
+      _NavItemSpec(
+        section: AppSection.roles,
+        icon: LucideIcons.shield,
+        label: 'Roles y auditoría',
+      ),
+      _NavItemSpec(
+        section: AppSection.schema,
+        icon: LucideIcons.circleCheck,
+        label: 'Cobertura',
+      ),
+    ],
+  ),
+];
+
+class _Sidebar extends StatefulWidget {
   const _Sidebar({this.forceExpanded = false});
   final bool forceExpanded;
 
   @override
+  State<_Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends State<_Sidebar> {
+  // Groups the user has manually collapsed. Empty by default: every group
+  // starts open, and clicking a header toggles it from there.
+  final Set<String> _collapsedGroups = {};
+
+  @override
   Widget build(BuildContext context) {
+    final forceExpanded = widget.forceExpanded;
     final nav = context.watch<NavigationController>();
     final collapsed = forceExpanded ? false : nav.sidebarCollapsed;
     final width = collapsed ? 82.0 : 300.0;
     return AnimatedContainer(
-      duration: PomgtMotion.medium,
+      duration: PomgtMotion.duration(context, PomgtMotion.medium),
       curve: PomgtMotion.curve,
       width: width,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: PomgtColors.canvas,
-        border: Border(right: const BorderSide(color: PomgtColors.line)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .06),
-            blurRadius: 12,
-            offset: const Offset(2, 0),
-          ),
-        ],
+        border: Border(right: BorderSide(color: PomgtColors.line)),
       ),
       child: SafeArea(
         child: Column(
@@ -293,7 +423,7 @@ class _Sidebar extends StatelessWidget {
                               tooltip: 'Contraer navegación',
                               onPressed: nav.toggleSidebar,
                               icon: const Icon(
-                                CupertinoIcons.sidebar_left,
+                                LucideIcons.panelLeft,
                                 size: 18,
                                 color: PomgtColors.muted,
                               ),
@@ -304,77 +434,53 @@ class _Sidebar extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Expanded(
-              child: ListView(
+              child: PomgtListView(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 children: [
                   _NavItem(
                     section: AppSection.dashboard,
-                    icon: CupertinoIcons.rectangle_grid_2x2,
+                    icon: LucideIcons.panelsTopLeft,
                     label: 'Inicio',
                     collapsed: collapsed,
                   ),
-                  if (!collapsed) const _NavLabel('OPERACIÓN'),
-                  _NavItem(
-                    section: AppSection.customers,
-                    icon: CupertinoIcons.building_2_fill,
-                    label: 'Clientes',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.orders,
-                    icon: CupertinoIcons.doc_plaintext,
-                    label: 'Pedidos',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.products,
-                    icon: CupertinoIcons.cube_box,
-                    label: 'Productos',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.materials,
-                    icon: CupertinoIcons.layers,
-                    label: 'Materiales',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.bom,
-                    icon: CupertinoIcons.square_stack_3d_up,
-                    label: 'Estructuras de fabricación',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.routings,
-                    icon: CupertinoIcons.arrow_branch,
-                    label: 'Rutas de fabricación',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.production,
-                    icon: CupertinoIcons.gear_alt,
-                    label: 'Producción',
-                    collapsed: collapsed,
-                  ),
-                  if (!collapsed) const _NavLabel('SISTEMA'),
-                  _NavItem(
-                    section: AppSection.documents,
-                    icon: CupertinoIcons.folder,
-                    label: 'Documentos',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.masterData,
-                    icon: CupertinoIcons.slider_horizontal_3,
-                    label: 'Datos maestros',
-                    collapsed: collapsed,
-                  ),
-                  _NavItem(
-                    section: AppSection.schema,
-                    icon: CupertinoIcons.check_mark_circled,
-                    label: 'Cobertura',
-                    collapsed: collapsed,
-                  ),
+                  const SizedBox(height: 6),
+                  if (collapsed)
+                    for (final entry in _navEntries)
+                      if (entry is _NavGroupSpec)
+                        for (final item in entry.items)
+                          _NavItem(
+                            section: item.section,
+                            icon: item.icon,
+                            label: item.label,
+                            collapsed: true,
+                          )
+                      else if (entry is _NavItemSpec)
+                        _NavItem(
+                          section: entry.section,
+                          icon: entry.icon,
+                          label: entry.label,
+                          collapsed: true,
+                        ),
+                  if (!collapsed)
+                    for (final entry in _navEntries)
+                      if (entry is _NavGroupSpec)
+                        _NavGroup(
+                          group: entry,
+                          expanded: !_collapsedGroups.contains(entry.label),
+                          activeSection: nav.section,
+                          onToggle: () => setState(() {
+                            if (!_collapsedGroups.add(entry.label)) {
+                              _collapsedGroups.remove(entry.label);
+                            }
+                          }),
+                        )
+                      else if (entry is _NavItemSpec)
+                        _NavItem(
+                          section: entry.section,
+                          icon: entry.icon,
+                          label: entry.label,
+                          collapsed: false,
+                        ),
                 ],
               ),
             ),
@@ -393,22 +499,91 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _NavLabel extends StatelessWidget {
-  const _NavLabel(this.text);
-  final String text;
+/// A collapsible sidebar section: a clickable header (icon, label, chevron)
+/// followed by its indented, guide-lined children when expanded.
+class _NavGroup extends StatelessWidget {
+  const _NavGroup({
+    required this.group,
+    required this.expanded,
+    required this.activeSection,
+    required this.onToggle,
+  });
+  final _NavGroupSpec group;
+  final bool expanded;
+  final AppSection activeSection;
+  final VoidCallback onToggle;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 22, 12, 8),
-    child: Text(
-      text,
-      style: const TextStyle(
-        fontSize: 10,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.1,
-        color: PomgtColors.muted,
+  Widget build(BuildContext context) {
+    final active = group.items.any((i) => i.section == activeSection);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _NavItemFrame(
+            icon: group.icon,
+            label: group.label,
+            collapsed: false,
+            // Never "selected" like a leaf item — the active child already
+            // carries the full treatment, and the chevron below communicates
+            // the group's own open/closed state. Two elements sharing the
+            // same emphasis reads as two different "current page" signals.
+            // Collapsed, though, the active child is hidden — a light-blue
+            // background (no accent bar/bold text) says "it's in here".
+            selected: false,
+            subtleActive: active && !expanded,
+            onTap: onToggle,
+            trailing: AnimatedRotation(
+              duration: PomgtMotion.duration(context, PomgtMotion.fast),
+              turns: expanded ? 0.25 : 0,
+              child: const Icon(
+                LucideIcons.chevronRight,
+                size: 15,
+                color: PomgtColors.muted,
+              ),
+            ),
+          ),
+          PomgtAnimatedSize(
+            duration: PomgtMotion.duration(context, PomgtMotion.medium),
+            curve: PomgtMotion.curve,
+            alignment: Alignment.topCenter,
+            child: AnimatedOpacity(
+              duration: PomgtMotion.duration(context, PomgtMotion.medium),
+              curve: PomgtMotion.curve,
+              opacity: expanded ? 1 : 0,
+              child: expanded
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 27),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            left: BorderSide(color: PomgtColors.line),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Column(
+                            children: [
+                              for (final item in group.items)
+                                _NavItem(
+                                  section: item.section,
+                                  icon: item.icon,
+                                  label: item.label,
+                                  collapsed: false,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SidebarLogo extends StatelessWidget {
@@ -453,18 +628,10 @@ class _NavItem extends StatelessWidget {
 
     if (collapsed) {
       final content = _NavItemFrame(
+        icon: icon,
         collapsed: true,
         selected: selected,
         onTap: onTap,
-        builder: (context, hovered) => Icon(
-          icon,
-          size: 20,
-          color: selected
-              ? PomgtColors.canvas
-              : hovered
-              ? PomgtColors.blue
-              : PomgtColors.muted,
-        ),
       );
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -473,138 +640,216 @@ class _NavItem extends StatelessWidget {
         ),
       );
     }
-    final content = _NavItemFrame(
-      collapsed: false,
-      selected: selected,
-      onTap: onTap,
-      builder: (context, hovered) {
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final iconColor = selected
-                ? PomgtColors.canvas
-                : hovered
-                ? PomgtColors.blue
-                : PomgtColors.muted;
-            final textColor = selected
-                ? PomgtColors.canvas
-                : hovered
-                ? PomgtColors.blue
-                : PomgtColors.muted;
-            if (constraints.maxWidth < 44) {
-              return Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Icon(icon, size: 20, color: iconColor),
-                ),
-              );
-            }
-            return Row(
-              children: [
-                Icon(icon, size: 20, color: iconColor),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                      color: textColor,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: content,
+      child: _NavItemFrame(
+        icon: icon,
+        label: label,
+        collapsed: false,
+        selected: selected,
+        onTap: onTap,
+      ),
     );
   }
 }
 
+/// A nav row's interaction chrome and selection animation. Deliberately has
+/// no hover visual at all (just the pointer cursor) — selection is the only
+/// state worth signaling, shown as a sliding accent (expanded) or a soft
+/// glow behind the icon (collapsed rail), plus a color/weight morph and a
+/// small sine "pop" on the icon as it transitions. No filled background, no
+/// border: one lightweight cue instead of four competing ones.
 class _NavItemFrame extends StatefulWidget {
   const _NavItemFrame({
+    required this.icon,
     required this.selected,
     required this.collapsed,
     required this.onTap,
-    required this.builder,
+    this.label,
+    this.trailing,
+    this.subtleActive = false,
   });
 
+  final IconData icon;
   final bool selected;
   final bool collapsed;
   final VoidCallback onTap;
-  final Widget Function(BuildContext context, bool hovered) builder;
+  final String? label;
+  final Widget? trailing;
+
+  /// A quieter cue than [selected]: a light-blue background with no accent
+  /// bar or bold text, for a collapsed group whose active child is hidden
+  /// inside it — so "your page is in here" still reads without duplicating
+  /// the child's own full selected treatment.
+  final bool subtleActive;
 
   @override
   State<_NavItemFrame> createState() => _NavItemFrameState();
 }
 
 class _NavItemFrameState extends State<_NavItemFrame> {
+  bool _pressed = false;
   bool _hovered = false;
-  bool _suppressHoverUntilExit = false;
 
   void _setHovered(bool value) {
     if (_hovered == value) return;
     setState(() => _hovered = value);
   }
 
-  void _enter() {
-    if (_suppressHoverUntilExit) return;
-    _setHovered(true);
-  }
-
-  void _exit() {
-    _suppressHoverUntilExit = false;
-    _setHovered(false);
-  }
-
-  void _tap() {
-    _suppressHoverUntilExit = true;
-    if (_hovered) _setHovered(false);
-    widget.onTap();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final color = widget.selected ? PomgtColors.blue : Colors.transparent;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      opaque: true,
-      onEnter: (_) => _enter(),
-      onExit: (_) => _exit(),
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           mouseCursor: SystemMouseCursors.click,
+          borderRadius: PomgtRadii.borderSm,
           hoverColor: Colors.transparent,
-          focusColor: Colors.transparent,
           splashColor: Colors.transparent,
           highlightColor: Colors.transparent,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-          onTap: _tap,
-          child: AnimatedContainer(
-            duration: PomgtMotion.fast,
+          focusColor: PomgtColors.blueSoft,
+          onTap: widget.onTap,
+          onHighlightChanged: (value) {
+            if (mounted) setState(() => _pressed = value);
+          },
+          child: AnimatedScale(
+            scale: _pressed ? .96 : 1,
+            duration: PomgtMotion.duration(context, PomgtMotion.fast),
             curve: PomgtMotion.curve,
-            width: widget.collapsed ? 48 : null,
-            height: 48,
-            alignment: widget.collapsed ? Alignment.center : null,
-            padding: widget.collapsed
-                ? EdgeInsets.zero
-                : const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: PomgtRadii.borderSm,
-              boxShadow: null,
+            child: Stack(
+              children: [
+                // Each background is its own layer animating only its own
+                // alpha against a fixed RGB — stacking them (rather than
+                // swapping one `color` between different RGBs, or against
+                // Colors.transparent) avoids any muddy cross-fade.
+                Positioned.fill(
+                  child: AnimatedContainer(
+                    duration: PomgtMotion.duration(context, PomgtMotion.medium),
+                    curve: PomgtMotion.curve,
+                    decoration: BoxDecoration(
+                      color: PomgtColors.navySelected.withValues(
+                        alpha: widget.subtleActive ? 1 : 0,
+                      ),
+                      borderRadius: PomgtRadii.borderSm,
+                    ),
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: PomgtMotion.duration(context, PomgtMotion.fast),
+                  curve: PomgtMotion.curve,
+                  decoration: BoxDecoration(
+                    color: PomgtColors.surfaceAlt.withValues(
+                      alpha: _hovered ? 1 : 0,
+                    ),
+                    borderRadius: PomgtRadii.borderSm,
+                  ),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: widget.selected ? 1.0 : 0.0),
+                    duration: PomgtMotion.duration(context, PomgtMotion.slow),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, t, _) => widget.collapsed
+                        ? _collapsedContent(t)
+                        : _expandedContent(t),
+                  ),
+                ),
+              ],
             ),
-            child: widget.builder(context, _hovered),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _icon(double t, {double size = 20}) {
+    final color = Color.lerp(PomgtColors.navIcon, PomgtColors.blueHover, t)!;
+    final pop = 1 + 0.14 * math.sin(t * math.pi);
+    return Transform.scale(
+      scale: pop,
+      child: Icon(widget.icon, size: size, color: color),
+    );
+  }
+
+  Widget _collapsedContent(double t) {
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Center(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 38 * (.6 + .4 * t),
+              height: 38 * (.6 + .4 * t),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: PomgtColors.blueSoft.withValues(alpha: t),
+              ),
+            ),
+            _icon(t),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _expandedContent(double t) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 70) {
+          return SizedBox(height: 48, child: Center(child: _icon(t)));
+        }
+        return SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 10,
+                child: Center(
+                  child: Transform.scale(
+                    scaleY: t,
+                    child: Container(
+                      width: 3,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: PomgtColors.blueHover,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _icon(t),
+              const SizedBox(width: 14),
+              if (widget.label != null)
+                Expanded(
+                  child: Text(
+                    widget.label!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.lerp(
+                        FontWeight.w500,
+                        FontWeight.w600,
+                        t,
+                      ),
+                      color: Color.lerp(
+                        PomgtColors.ink,
+                        PomgtColors.blueHover,
+                        t,
+                      ),
+                    ),
+                  ),
+                ),
+              if (widget.trailing != null) widget.trailing!,
+              const SizedBox(width: 4),
+            ],
+          ),
+        );
+      },
     );
   }
 }

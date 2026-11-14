@@ -1,6 +1,10 @@
-import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import 'pomgt_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../controllers/feature_controllers.dart';
 import '../../controllers/runtime_data_controller.dart';
 import '../../data/phase1_schema.dart';
@@ -10,13 +14,16 @@ import '../theme/pomgt_theme.dart';
 import '../utils/app_notice.dart';
 import '../utils/ui_copy.dart';
 import '../utils/error_copy.dart';
+import 'categorized_picker.dart';
 import 'empty_state.dart';
 import 'entity_crud_panel.dart';
 import 'info_tip.dart';
 import 'motion.dart';
 import 'pomgt_button.dart';
+import 'scroll_to_top.dart';
 import 'section_header.dart';
 import 'status_pill.dart';
+import 'section_title.dart';
 
 class ChildTabDefinition {
   const ChildTabDefinition({
@@ -35,6 +42,7 @@ class RecordWorkspace extends StatefulWidget {
   const RecordWorkspace({
     super.key,
     required this.title,
+    required this.titleIcon,
     required this.help,
     required this.masterTable,
     required this.controller,
@@ -52,9 +60,11 @@ class RecordWorkspace extends StatefulWidget {
     this.showRowActions = true,
     this.rowLeadingIcon,
     this.plainRowStatus = false,
+    this.onDelete,
   });
 
   final String title;
+  final IconData titleIcon;
   final String help;
   final String masterTable;
   final FeatureSelectionController controller;
@@ -74,6 +84,12 @@ class RecordWorkspace extends StatefulWidget {
   final bool showRowActions;
   final IconData? rowLeadingIcon;
   final bool plainRowStatus;
+
+  /// Overrides the plain `DELETE` used when removing the selected master
+  /// row. Use this when the table has related records that the database
+  /// won't cascade-delete on its own (e.g. an RPC that removes the
+  /// dependents first, or blocks deletion to protect real traceability).
+  final Future<void> Function(Map<String, dynamic> row)? onDelete;
 
   @override
   State<RecordWorkspace> createState() => _RecordWorkspaceState();
@@ -134,7 +150,7 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final changed = await showDialog<bool>(
+    final changed = await showPomgtDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
@@ -167,22 +183,29 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
 
   Future<void> _delete(Map<String, dynamic> row) async {
     final label = _MasterList.displayFor(spec, row);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPomgtDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            const Icon(
-              CupertinoIcons.trash,
-              size: 21,
-              color: PomgtColors.danger,
-            ),
+            const Icon(LucideIcons.trash2, size: 21, color: PomgtColors.danger),
             const SizedBox(width: 10),
             Expanded(child: Text('Eliminar $label')),
+            IconButton(
+              tooltip: 'Cerrar',
+              onPressed: () => Navigator.pop(context, false),
+              icon: const Icon(LucideIcons.x, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              visualDensity: VisualDensity.compact,
+            ),
           ],
         ),
-        content: const Text(
-          'Esta acción no se puede deshacer. Si el registro ya participa en pedidos, producción u otra trazabilidad, la base de datos puede impedir su eliminación.',
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: const Text(
+            'Esta acción no se puede deshacer. Si el registro ya participa en pedidos, producción u otra trazabilidad, la base de datos puede impedir su eliminación.',
+          ),
         ),
         actions: [
           TextButton(
@@ -198,10 +221,15 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
     );
     if (confirmed != true) return;
     try {
-      await repository.deleteRow(spec, row);
+      if (widget.onDelete != null) {
+        await widget.onDelete!(row);
+      } else {
+        await repository.deleteRow(spec, row);
+      }
       lookups.invalidate(widget.masterTable);
       widget.controller.clear();
       _reload();
+      if (mounted) showPomgtSnackBar(context, '$label eliminado.');
     } catch (e) {
       if (!mounted) return;
       showPomgtSnackBar(context, _workspaceFriendlyError(e), isError: true);
@@ -233,10 +261,9 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Flexible(
-                          child: Text(
+                          child: SectionTitle(
                             widget.title,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.headlineMedium,
+                            icon: widget.titleIcon,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -245,7 +272,7 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                     ),
                     PomgtButton(
                       label: widget.createLabel,
-                      icon: CupertinoIcons.add,
+                      icon: LucideIcons.plus,
                       onPressed: () => _edit(),
                     ),
                   ],
@@ -257,10 +284,9 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                       child: Row(
                         children: [
                           Flexible(
-                            child: Text(
+                            child: SectionTitle(
                               widget.title,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.headlineMedium,
+                              icon: widget.titleIcon,
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -271,7 +297,7 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                     const SizedBox(width: 18),
                     PomgtButton(
                       label: widget.createLabel,
-                      icon: CupertinoIcons.add,
+                      icon: LucideIcons.plus,
                       onPressed: () => _edit(),
                     ),
                   ],
@@ -290,9 +316,7 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                         snapshot.data ?? const <Map<String, dynamic>>[];
                     if (snapshot.connectionState == ConnectionState.waiting &&
                         rows.isEmpty)
-                      return const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      );
+                      return const PomgtLoading();
                     final visibleRows = widget.rowFilter == null
                         ? rows
                         : rows.where(widget.rowFilter!).toList();
@@ -350,7 +374,9 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                               Expanded(
                                 child: SoftContentSwitch(
                                   child: selected == null
-                                      ? const _NothingSelected()
+                                      ? const _DetailSurface(
+                                          child: _NothingSelected(),
+                                        )
                                       : _DetailSurface(
                                           key: ValueKey(
                                             selected['id']?.toString() ??
@@ -390,7 +416,9 @@ class _RecordWorkspaceState extends State<RecordWorkspace> {
                             Expanded(
                               child: SoftContentSwitch(
                                 child: selected == null
-                                    ? const _NothingSelected()
+                                    ? const _DetailSurface(
+                                        child: _NothingSelected(),
+                                      )
                                     : _DetailSurface(
                                         key: ValueKey(
                                           selected['id']?.toString() ??
@@ -440,8 +468,9 @@ class _DetailSurface extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
         borderRadius: PomgtRadii.borderMd,
-        border: Border.all(color: PomgtColors.lineStrong.withValues(alpha: .6)),
-        boxShadow: PomgtShadows.card,
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
@@ -483,8 +512,9 @@ class _MasterList extends StatelessWidget {
       decoration: BoxDecoration(
         color: PomgtColors.canvas,
         borderRadius: PomgtRadii.borderMd,
-        border: Border.all(color: PomgtColors.line),
-        boxShadow: PomgtShadows.card,
+        border: Border.all(
+          color: PomgtColors.lineStrong.withValues(alpha: .55),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -500,7 +530,7 @@ class _MasterList extends StatelessWidget {
                       onChanged: onSearch,
                       decoration: const InputDecoration(
                         hintText: 'Buscar',
-                        prefixIcon: Icon(CupertinoIcons.search, size: 20),
+                        prefixIcon: Icon(LucideIcons.search, size: 20),
                         prefixIconConstraints: BoxConstraints(minWidth: 46),
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 18,
@@ -513,7 +543,7 @@ class _MasterList extends StatelessWidget {
                 IconButton(
                   tooltip: 'Actualizar',
                   onPressed: onRefresh,
-                  icon: const Icon(CupertinoIcons.refresh, size: 18),
+                  icon: const Icon(LucideIcons.refreshCw, size: 18),
                 ),
               ],
             ),
@@ -526,130 +556,137 @@ class _MasterList extends StatelessWidget {
                       style: const TextStyle(color: PomgtColors.muted),
                     ),
                   )
-                : ListView.separated(
-                    itemCount: rows.length,
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
-                      final id = row['id']?.toString();
-                      final selected = id == selectedId;
-                      final status =
-                          row['status']?.toString() ??
-                          row['line_status']?.toString();
-                      return SmoothHover(
-                        selected: selected,
-                        selectedColor: PomgtColors.navySelected,
-                        hoverColor: PomgtColors.surfaceAlt.withValues(
-                          alpha: .55,
-                        ),
-                        borderColor: selected
-                            ? PomgtColors.navySelectedBorder
-                            : PomgtColors.line,
-                        lift: .2,
-                        padding: const EdgeInsets.fromLTRB(16, 15, 10, 15),
-                        onTap: () => onSelect(id),
-                        onDoubleTap: () => onEdit(row),
-                        child: Row(
-                          children: [
-                            if (leadingIcon != null) ...[
-                              SizedBox(
-                                width: 30,
-                                height: 30,
-                                child: Icon(
-                                  leadingIcon,
-                                  size: 16,
-                                  color: selected
-                                      ? PomgtColors.navy
-                                      : PomgtColors.secondaryInk,
+                : ScrollToTopArea(
+                    padding: const EdgeInsets.all(10),
+                    builder: (context, controller) => PomgtListView.separated(
+                      controller: controller,
+                      itemCount: rows.length,
+                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final row = rows[index];
+                        final id = row['id']?.toString();
+                        final selected = id == selectedId;
+                        final status =
+                            row['status']?.toString() ??
+                            row['line_status']?.toString();
+                        return SmoothHover(
+                          selected: selected,
+                          selectedColor: PomgtColors.navySelected,
+                          hoverColor: PomgtColors.surfaceAlt.withValues(
+                            alpha: .55,
+                          ),
+                          borderColor: selected
+                              ? PomgtColors.navySelectedBorder
+                              : PomgtColors.line,
+                          lift: .2,
+                          padding: const EdgeInsets.fromLTRB(16, 15, 10, 15),
+                          onTap: () => onSelect(id),
+                          onDoubleTap: () => onEdit(row),
+                          child: Row(
+                            children: [
+                              if (leadingIcon != null) ...[
+                                SizedBox(
+                                  width: 30,
+                                  height: 30,
+                                  child: Icon(
+                                    leadingIcon,
+                                    size: 16,
+                                    color: selected
+                                        ? PomgtColors.navy
+                                        : PomgtColors.secondaryInk,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      displayFor(spec, row),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: selected
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
+                                        color: PomgtColors.ink,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      _subtitle(spec, row),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        color: PomgtColors.muted,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                            ],
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    displayFor(spec, row),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: selected
-                                          ? FontWeight.w700
-                                          : FontWeight.w600,
-                                      color: PomgtColors.ink,
-                                    ),
+                              if (status != null && !showActions)
+                                StatusPill(status, plain: plainStatus),
+                              if (showActions)
+                                PopupMenuButton<String>(
+                                  popUpAnimationStyle: PomgtMotion.style(
+                                    context,
                                   ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    _subtitle(spec, row),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      color: PomgtColors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (status != null && !showActions)
-                              StatusPill(status, plain: plainStatus),
-                            if (showActions)
-                              PopupMenuButton<String>(
-                                tooltip: 'Acciones',
-                                padding: EdgeInsets.zero,
-                                onSelected: (value) {
-                                  if (value == 'edit') onEdit(row);
-                                  if (value == 'delete') onDelete?.call(row);
-                                },
-                                itemBuilder: (_) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Row(
-                                      children: [
-                                        Icon(CupertinoIcons.pencil, size: 17),
-                                        SizedBox(width: 9),
-                                        Text('Editar'),
-                                      ],
-                                    ),
-                                  ),
-                                  if (onDelete != null)
+                                  tooltip: 'Acciones',
+                                  padding: EdgeInsets.zero,
+                                  onSelected: (value) {
+                                    if (value == 'edit') onEdit(row);
+                                    if (value == 'delete') onDelete?.call(row);
+                                  },
+                                  itemBuilder: (_) => [
                                     const PopupMenuItem(
-                                      value: 'delete',
+                                      value: 'edit',
                                       child: Row(
                                         children: [
-                                          Icon(
-                                            CupertinoIcons.trash,
-                                            size: 17,
-                                            color: PomgtColors.danger,
-                                          ),
+                                          Icon(LucideIcons.pencil, size: 17),
                                           SizedBox(width: 9),
-                                          Text(
-                                            'Eliminar',
-                                            style: TextStyle(
-                                              color: PomgtColors.danger,
-                                            ),
-                                          ),
+                                          Text('Editar'),
                                         ],
                                       ),
                                     ),
-                                ],
-                                child: const Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: Icon(
-                                    CupertinoIcons.ellipsis_vertical,
-                                    size: 17,
-                                    color: PomgtColors.muted,
+                                    if (onDelete != null)
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              LucideIcons.trash2,
+                                              size: 17,
+                                              color: PomgtColors.danger,
+                                            ),
+                                            SizedBox(width: 9),
+                                            Text(
+                                              'Eliminar',
+                                              style: TextStyle(
+                                                color: PomgtColors.danger,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: Icon(
+                                      LucideIcons.ellipsisVertical,
+                                      size: 17,
+                                      color: PomgtColors.muted,
+                                    ),
                                   ),
                                 ),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -774,7 +811,7 @@ class DetailHeader extends StatelessWidget {
                   IconButton(
                     tooltip: 'Editar información principal',
                     onPressed: onEdit,
-                    icon: const Icon(CupertinoIcons.pencil, size: 18),
+                    icon: const Icon(LucideIcons.pencil, size: 18),
                   ),
                 ],
               ],
@@ -790,7 +827,7 @@ class DetailHeader extends StatelessWidget {
                 IconButton(
                   tooltip: 'Editar información principal',
                   onPressed: onEdit,
-                  icon: const Icon(CupertinoIcons.pencil, size: 18),
+                  icon: const Icon(LucideIcons.pencil, size: 18),
                 ),
               ],
             ],
@@ -837,7 +874,7 @@ class ChildTabs extends StatelessWidget {
         ),
       );
     }
-    return DefaultTabController(
+    return PomgtTabController(
       length: tabs.length,
       child: Column(
         children: [
@@ -978,8 +1015,7 @@ class _NestedRelationPanelState extends State<NestedRelationPanel> {
                   child: EmptyState(
                     title:
                         'Primero agrega ${UiCopy.tableTitle(spec.table, spec.title).toLowerCase()}',
-                    message:
-                        'Esta sección depende de un registro padre. Créalo en la pestaña correspondiente y vuelve aquí.',
+                    message: 'Esta sección depende de un registro padre. Créalo en la pestaña correspondiente y vuelve aquí.',
                   ),
                 );
               selected ??= rows.first['id']?.toString();
@@ -999,30 +1035,29 @@ class _NestedRelationPanelState extends State<NestedRelationPanel> {
                           width: compact
                               ? double.infinity
                               : MediaQuery.sizeOf(context).width * .42,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: current,
-                            decoration: InputDecoration(
-                              labelText:
-                                  'Seleccionar ${UiCopy.tableTitle(spec.table, spec.title).toLowerCase()}',
-                            ),
-                            items: rows
-                                .map(
-                                  (r) => DropdownMenuItem(
-                                    value: r['id']?.toString(),
-                                    child: Text(
-                                      widget.lookups.display(spec, r),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                          child: CategorizedSearchPicker(
+                            label:
+                                'Seleccionar ${UiCopy.tableTitle(spec.table, spec.title).toLowerCase()}',
+                            hint: 'Buscar…',
+                            value: current,
+                            items: [
+                              for (final r in rows)
+                                PickerItem(
+                                  id: r['id']?.toString() ?? '',
+                                  label: widget.lookups.display(spec, r),
+                                  category: UiCopy.tableTitle(
+                                    spec.table,
+                                    spec.title,
                                   ),
-                                )
-                                .toList(),
+                                ),
+                            ],
                             onChanged: (v) => setState(() => selected = v),
                           ),
                         ),
                         IconButton(
                           tooltip: 'Actualizar',
                           onPressed: reload,
-                          icon: const Icon(CupertinoIcons.refresh, size: 18),
+                          icon: const Icon(LucideIcons.refreshCw, size: 18),
                         ),
                       ],
                     ),
@@ -1052,7 +1087,7 @@ class _NothingSelected extends StatelessWidget {
   const _NothingSelected();
   @override
   Widget build(BuildContext context) => const EmptyState(
-    icon: CupertinoIcons.square_list,
+    icon: LucideIcons.list,
     title: 'Selecciona un registro',
     message: 'El detalle y sus relaciones aparecerán aquí.',
   );
@@ -1064,7 +1099,7 @@ class _WorkspaceError extends StatelessWidget {
   final VoidCallback onRetry;
   @override
   Widget build(BuildContext context) => EmptyState(
-    icon: CupertinoIcons.exclamationmark_triangle,
+    icon: LucideIcons.triangleAlert,
     title: 'No pudimos cargar la información',
     message: ErrorCopy.message(
       error,
